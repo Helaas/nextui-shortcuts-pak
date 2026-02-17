@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	_ "github.com/BrandonKowalski/certifiable"
@@ -24,7 +23,13 @@ const (
 var platform Platform
 
 func main() {
-	platform = detectPlatform()
+	platform = PlatformTG5040
+	platformEnv := strings.ToUpper(os.Getenv("PLATFORM"))
+	if strings.Contains(platformEnv, "TG5050") {
+		platform = PlatformTG5050
+	} else if strings.Contains(platformEnv, "TG5040") || strings.Contains(platformEnv, "TG3040") {
+		platform = PlatformTG5040
+	}
 
 	logPath := getLogPath()
 	gaba.Init(gaba.Options{
@@ -55,36 +60,13 @@ func runApp() {
 	}
 }
 
-func detectPlatform() Platform {
-	p := strings.ToUpper(os.Getenv("PLATFORM"))
-	switch {
-	case strings.Contains(p, "TG5050"):
-		return PlatformTG5050
-	case strings.Contains(p, "TG5040"), strings.Contains(p, "TG3040"):
-		return PlatformTG5040
-	default:
-		if runtime.GOOS == "darwin" {
-			return PlatformMac
-		}
-		return PlatformTG5040
-	}
-}
-
 func getLogPath() string {
-	if platform == PlatformMac {
-		return filepath.Join(".", "shortcuts.log")
+	sdcard := os.Getenv("SDCARD_PATH")
+	if sdcard == "" {
+		sdcard = "/mnt/SDCARD"
 	}
 
-	userdata := os.Getenv("SHARED_USERDATA_PATH")
-	if userdata == "" {
-		home := os.Getenv("HOME")
-		if home == "" {
-			home = "/root"
-		}
-		userdata = filepath.Join(home, ".userdata")
-	}
-
-	logDir := filepath.Join(userdata, string(platform), "logs")
+	logDir := filepath.Join(sdcard, ".userdata", string(platform), "logs")
 	return filepath.Join(logDir, "shortcuts.log")
 }
 

@@ -10,6 +10,7 @@ DOCKER_IMG := ghcr.io/brandonkowalski/quasimodo:latest
 
 BUILD_DIR  := build
 CACHE_DIR  := .cache
+TOOLCHAIN_CACHE := $(CACHE_DIR)/go-toolchain
 
 # ── Platform auto-detection ──────────────────────────────────
 
@@ -36,28 +37,28 @@ mac:
 # ── Docker ARM64 builds ──────────────────────────────────────
 
 tg5040:
-	@mkdir -p $(BUILD_DIR)/tg5040/lib $(CACHE_DIR)/go-mod $(CACHE_DIR)/go-build $(CACHE_DIR)/go-toolchain
+	@mkdir -p $(BUILD_DIR)/tg5040/lib $(CACHE_DIR)/go-mod $(CACHE_DIR)/go-build $(TOOLCHAIN_CACHE)
 	docker run --rm --platform linux/arm64 \
-		-v "$(CURDIR)":/src \
-		-v "$(CURDIR)/$(CACHE_DIR)/go-mod":/go/pkg/mod \
+		-v "$(CURDIR)":/build \
+		-v "$(CURDIR)/$(CACHE_DIR)/go-mod":/root/go/pkg/mod \
 		-v "$(CURDIR)/$(CACHE_DIR)/go-build":/root/.cache/go-build \
-		-v "$(CURDIR)/$(CACHE_DIR)/go-toolchain":/root/sdk \
-		-w /src \
+		-v "$(CURDIR)/$(TOOLCHAIN_CACHE)":/root/.cache/go-toolchain \
+		-w /build \
 		$(DOCKER_IMG) \
-		sh -c 'CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -mod=vendor -o $(BUILD_DIR)/tg5040/$(APP_NAME) . && \
+		sh -c 'GOTOOLCHAINCACHE=/root/.cache/go-toolchain CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -mod=vendor -o $(BUILD_DIR)/tg5040/$(APP_NAME) . && \
 		       cp /usr/lib/aarch64-linux-gnu/libSDL2_gfx-1.0.so.0.0.2 $(BUILD_DIR)/tg5040/lib/libSDL2_gfx-1.0.so.0 && \
 		       cp /usr/lib/aarch64-linux-gnu/libSDL2_gfx-1.0.so.0.0.2 $(BUILD_DIR)/tg5040/lib/libSDL2_gfx-1.0.so.0.0.2'
 
 tg5050:
-	@mkdir -p $(BUILD_DIR)/tg5050/lib $(CACHE_DIR)/go-mod $(CACHE_DIR)/go-build $(CACHE_DIR)/go-toolchain
+	@mkdir -p $(BUILD_DIR)/tg5050/lib $(CACHE_DIR)/go-mod $(CACHE_DIR)/go-build $(TOOLCHAIN_CACHE)
 	docker run --rm --platform linux/arm64 \
-		-v "$(CURDIR)":/src \
-		-v "$(CURDIR)/$(CACHE_DIR)/go-mod":/go/pkg/mod \
+		-v "$(CURDIR)":/build \
+		-v "$(CURDIR)/$(CACHE_DIR)/go-mod":/root/go/pkg/mod \
 		-v "$(CURDIR)/$(CACHE_DIR)/go-build":/root/.cache/go-build \
-		-v "$(CURDIR)/$(CACHE_DIR)/go-toolchain":/root/sdk \
-		-w /src \
+		-v "$(CURDIR)/$(TOOLCHAIN_CACHE)":/root/.cache/go-toolchain \
+		-w /build \
 		$(DOCKER_IMG) \
-		sh -c 'CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -mod=vendor -o $(BUILD_DIR)/tg5050/$(APP_NAME) . && \
+		sh -c 'GOTOOLCHAINCACHE=/root/.cache/go-toolchain CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -mod=vendor -o $(BUILD_DIR)/tg5050/$(APP_NAME) . && \
 		       cp /usr/lib/aarch64-linux-gnu/libSDL2_gfx-1.0.so.0.0.2 $(BUILD_DIR)/tg5050/lib/libSDL2_gfx-1.0.so.0 && \
 		       cp /usr/lib/aarch64-linux-gnu/libSDL2_gfx-1.0.so.0.0.2 $(BUILD_DIR)/tg5050/lib/libSDL2_gfx-1.0.so.0.0.2'
 
