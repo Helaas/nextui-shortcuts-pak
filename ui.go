@@ -342,7 +342,7 @@ func manageShortcutsFlow() {
 type detailAction int
 
 const (
-	detailActionBack    detailAction = iota
+	detailActionBack detailAction = iota
 	detailActionDeleted
 )
 
