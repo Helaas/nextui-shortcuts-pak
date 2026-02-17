@@ -1,0 +1,13 @@
+{
+  "name": "Shortcuts",
+  "version": "v1.0.0",
+  "type": "TOOL",
+  "description": "Create and manage main menu shortcuts for ROMs and Tools on NextUI.",
+  "author": "Helaas",
+  "repo_url": "https://github.com/Helaas/nextui-shortcuts-pak",
+  "release_filename": "Shortcuts.pakz",
+  "platforms": [
+    "tg5040",
+    "tg5050"
+  ]
+}
