@@ -1,14 +1,15 @@
 --- a/vendor/github.com/BrandonKowalski/gabagool/v2/pkg/gabagool/init.go
 +++ b/vendor/github.com/BrandonKowalski/gabagool/v2/pkg/gabagool/init.go
-@@ -9,6 +9,7 @@ import (
+@@ -9,6 +9,7 @@
+ import (
  	"log/slog"
  	"os"
 +	"strings"
  	"time"
-
+ 
  	"github.com/BrandonKowalski/gabagool/v2/pkg/gabagool/constants"
-@@ -53,9 +54,16 @@ func Init(options Options) {
-
+@@ -54,9 +55,18 @@
+ 
  	if options.IsNextUI {
  		theme := nextui.InitNextUITheme()
 +

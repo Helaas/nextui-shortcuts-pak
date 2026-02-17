@@ -31,7 +31,11 @@ func main() {
 		platform = PlatformTG5040
 	}
 
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	log.SetPrefix("shortcuts: ")
+
 	logPath := getLogPath()
+	log.Printf("startup: platform=%s logPath=%s", platform, logPath)
 	gaba.Init(gaba.Options{
 		WindowTitle:    "Shortcuts",
 		ShowBackground: true,

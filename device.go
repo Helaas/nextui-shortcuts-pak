@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -104,6 +105,7 @@ func scanConsoleDirs() ([]ConsoleDir, error) {
 	sort.Slice(consoles, func(i, j int) bool {
 		return strings.ToLower(consoles[i].Display) < strings.ToLower(consoles[j].Display)
 	})
+	log.Printf("scanConsoleDirs: found %d console folders", len(consoles))
 	return consoles, nil
 }
 
@@ -130,6 +132,7 @@ func scanROMs(consoleDir string) ([]ROMFile, error) {
 	sort.Slice(roms, func(i, j int) bool {
 		return strings.ToLower(roms[i].Display) < strings.ToLower(roms[j].Display)
 	})
+	log.Printf("scanROMs: dir=%s roms=%d", consoleDir, len(roms))
 	return roms, nil
 }
 
@@ -161,6 +164,7 @@ func scanTools() ([]ToolPak, error) {
 	sort.Slice(tools, func(i, j int) bool {
 		return strings.ToLower(tools[i].Display) < strings.ToLower(tools[j].Display)
 	})
+	log.Printf("scanTools: dir=%s tools=%d", toolsDir, len(tools))
 	return tools, nil
 }
 
@@ -210,6 +214,7 @@ func scanShortcuts() ([]Shortcut, error) {
 	sort.Slice(shortcuts, func(i, j int) bool {
 		return strings.ToLower(shortcuts[i].Display) < strings.ToLower(shortcuts[j].Display)
 	})
+	log.Printf("scanShortcuts: dir=%s shortcuts=%d", romsDir, len(shortcuts))
 	return shortcuts, nil
 }
 
@@ -220,6 +225,7 @@ func createROMShortcut(displayName, tag, consoleDirName, romFileName string) err
 	romsDir, _, _ := getBasePaths()
 	folderName := fmt.Sprintf("%s %s (%s)", shortcutPrefix, displayName, tag)
 	folderPath := filepath.Join(romsDir, folderName)
+	log.Printf("createROMShortcut: name=%s tag=%s rom=%s", displayName, tag, romFileName)
 
 	if err := os.MkdirAll(folderPath, 0755); err != nil {
 		return fmt.Errorf("creating shortcut dir: %w", err)
@@ -233,6 +239,8 @@ func createROMShortcut(displayName, tag, consoleDirName, romFileName string) err
 		return fmt.Errorf("writing m3u: %w", err)
 	}
 
+	log.Printf("createROMShortcut: created folder=%s", folderPath)
+
 	return nil
 }
 
@@ -241,6 +249,7 @@ func createToolShortcut(displayName, pakPath string) error {
 	romsDir, _, _ := getBasePaths()
 	folderName := fmt.Sprintf("%s %s (%s)", shortcutPrefix, displayName, bridgeEmuTag)
 	folderPath := filepath.Join(romsDir, folderName)
+	log.Printf("createToolShortcut: name=%s pak=%s", displayName, pakPath)
 
 	if err := os.MkdirAll(folderPath, 0755); err != nil {
 		return fmt.Errorf("creating shortcut dir: %w", err)
@@ -258,11 +267,14 @@ func createToolShortcut(displayName, pakPath string) error {
 		return fmt.Errorf("writing m3u: %w", err)
 	}
 
+	log.Printf("createToolShortcut: created folder=%s", folderPath)
+
 	return nil
 }
 
 // removeShortcut removes a shortcut folder entirely.
 func removeShortcut(shortcutPath string) error {
+	log.Printf("removeShortcut: path=%s", shortcutPath)
 	return os.RemoveAll(shortcutPath)
 }
 
@@ -281,6 +293,7 @@ func ensureBridgeEmu() {
 	launchPath := filepath.Join(pakDir, "launch.sh")
 
 	if _, err := os.Stat(launchPath); err == nil {
+		log.Printf("ensureBridgeEmu: already present at %s", launchPath)
 		return // already exists
 	}
 
@@ -291,7 +304,10 @@ func ensureBridgeEmu() {
 
 	if err := os.WriteFile(launchPath, []byte(bridgeLaunchScript), 0755); err != nil {
 		logError("writing SHORTCUT.pak launch.sh", err)
+		return
 	}
+
+	log.Printf("ensureBridgeEmu: created at %s", launchPath)
 }
 
 // ── String utilities ─────────────────────────────────────────

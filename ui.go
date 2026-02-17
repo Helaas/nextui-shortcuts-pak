@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 
 	gaba "github.com/BrandonKowalski/gabagool/v2/pkg/gabagool"
 	"github.com/BrandonKowalski/gabagool/v2/pkg/gabagool/constants"
@@ -46,10 +47,13 @@ func showMainMenu() mainAction {
 
 	switch result.Selected[0] {
 	case 0:
+		log.Printf("ui: main menu -> add rom shortcut")
 		return mainActionAddROM
 	case 1:
+		log.Printf("ui: main menu -> add tool shortcut")
 		return mainActionAddTool
 	case 2:
+		log.Printf("ui: main menu -> manage shortcuts")
 		return mainActionManage
 	default:
 		return mainActionQuit
@@ -73,6 +77,7 @@ func addROMShortcutFlow() {
 
 	// Step 3: Choose display name (default: ROM display name)
 	displayName := rom.Display
+	log.Printf("ui: add rom shortcut: console=%s rom=%s", console.Display, rom.Name)
 
 	// Check if shortcut already exists
 	if shortcutExists(displayName, console.Tag) {
@@ -153,6 +158,7 @@ func pickConsole() (ConsoleDir, bool) {
 		return ConsoleDir{}, false
 	}
 
+	log.Printf("ui: selected console index=%d name=%s", result.Selected[0], consoles[result.Selected[0]].Display)
 	return consoles[result.Selected[0]], true
 }
 
@@ -187,6 +193,7 @@ func pickROM(console ConsoleDir) (ROMFile, bool) {
 		return ROMFile{}, false
 	}
 
+	log.Printf("ui: selected rom index=%d name=%s", result.Selected[0], roms[result.Selected[0]].Name)
 	return roms[result.Selected[0]], true
 }
 
@@ -199,6 +206,7 @@ func addToolShortcutFlow() {
 	}
 
 	displayName := tool.Display
+	log.Printf("ui: add tool shortcut: tool=%s", tool.Name)
 
 	// Check if shortcut already exists
 	if shortcutExists(displayName, bridgeEmuTag) {
@@ -279,6 +287,7 @@ func pickTool() (ToolPak, bool) {
 		return ToolPak{}, false
 	}
 
+	log.Printf("ui: selected tool index=%d name=%s", result.Selected[0], tools[result.Selected[0]].Name)
 	return tools[result.Selected[0]], true
 }
 
@@ -321,6 +330,7 @@ func manageShortcutsFlow() {
 		}
 
 		idx := result.Selected[0]
+		log.Printf("ui: manage shortcuts -> selected index=%d name=%s", idx, shortcuts[idx].Display)
 		action := showShortcutDetail(shortcuts[idx])
 		if action == detailActionDeleted || action == detailActionBack {
 			// Refresh the list (deleted or went back from detail)

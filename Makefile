@@ -69,6 +69,7 @@ embedded: tg5040 tg5050
 # TG5050 uses /dev/input/event2. This target applies the fix.
 
 GABAGOOL_INIT := vendor/github.com/BrandonKowalski/gabagool/v2/pkg/gabagool/init.go
+GABAGOOL_NEXTVAL := vendor/github.com/BrandonKowalski/gabagool/v2/pkg/gabagool/platform/nextui/theming.go
 
 patch-vendor:
 	@if [ -f "$(GABAGOOL_INIT)" ] && grep -q 'DevicePath:.*"/dev/input/event1"' "$(GABAGOOL_INIT)"; then \
@@ -79,6 +80,15 @@ patch-vendor:
 		echo "Patch applied."; \
 	else \
 		echo "Gabagool power button patch already applied (or vendor not present)."; \
+	fi
+	@if [ -f "$(GABAGOOL_NEXTVAL)" ] && ! grep -q 'platformEnv := strings.ToLower' "$(GABAGOOL_NEXTVAL)"; then \
+		echo "Patching Gabagool nextval path for TG5050 support..."; \
+		cp patches/gabagool-nextval-path-tg5050.patch /tmp/_gaba_nextval_patch.patch; \
+		cd "$(CURDIR)" && git apply --whitespace=nowarn patches/gabagool-nextval-path-tg5050.patch 2>/dev/null || \
+			patch -p1 < patches/gabagool-nextval-path-tg5050.patch; \
+		echo "Patch applied."; \
+	else \
+		echo "Gabagool nextval path patch already applied (or vendor not present)."; \
 	fi
 
 # ── Dependency management ────────────────────────────────────
