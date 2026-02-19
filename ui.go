@@ -17,6 +17,7 @@ const (
 	mainActionAddROM
 	mainActionAddTool
 	mainActionManage
+	mainActionSettings
 )
 
 func showMainMenu() mainAction {
@@ -24,6 +25,7 @@ func showMainMenu() mainAction {
 		{Text: "Add ROM Shortcut"},
 		{Text: "Add Tool Shortcut"},
 		{Text: "Manage Shortcuts"},
+		{Text: "Settings"},
 	}
 
 	opts := gaba.DefaultListOptions("Shortcuts", items)
@@ -55,8 +57,43 @@ func showMainMenu() mainAction {
 	case 2:
 		log.Printf("ui: main menu -> manage shortcuts")
 		return mainActionManage
+	case 3:
+		log.Printf("ui: main menu -> settings")
+		return mainActionSettings
 	default:
 		return mainActionQuit
+	}
+}
+
+// ── Position picker ──────────────────────────────────────────
+
+// pickPosition presents a list for choosing where the shortcut will sort in the menu.
+func pickPosition() (ShortcutPosition, bool) {
+	items := []gaba.MenuItem{
+		{Text: "Bottom  (after Z)  ★"},
+		{Text: "Top     (before A)"},
+		{Text: "Alphabetical"},
+	}
+	opts := gaba.DefaultListOptions("Shortcut Position", items)
+	opts.FooterHelpItems = []gaba.FooterHelpItem{
+		{ButtonName: "B", HelpText: "Back"},
+		{ButtonName: "A", HelpText: "Select"},
+	}
+	result, err := gaba.List(opts)
+	if isErrCancelled(err) {
+		return ShortcutPositionBottom, false
+	}
+	if err != nil || len(result.Selected) == 0 {
+		return ShortcutPositionBottom, false
+	}
+	log.Printf("ui: position picked: %d", result.Selected[0])
+	switch result.Selected[0] {
+	case 1:
+		return ShortcutPositionTop, true
+	case 2:
+		return ShortcutPositionAlpha, true
+	default:
+		return ShortcutPositionBottom, true
 	}
 }
 
@@ -75,11 +112,10 @@ func addROMShortcutFlow() {
 		return
 	}
 
-	// Step 3: Choose display name (default: ROM display name)
 	displayName := rom.Display
-	log.Printf("ui: add rom shortcut: console=%s rom=%s", console.Display, rom.Name)
+	log.Printf("ui: add rom shortcut: console=%s rom=%s multiDisc=%v", console.Display, rom.Name, rom.IsMultiDisc)
 
-	// Check if shortcut already exists
+	// Step 3: Check if shortcut already exists
 	if shortcutExists(displayName, console.Tag) {
 		gaba.ConfirmationMessage(
 			fmt.Sprintf("A shortcut for \"%s\" already exists.", displayName),
@@ -91,9 +127,21 @@ func addROMShortcutFlow() {
 		return
 	}
 
-	// Step 4: Confirm creation
-	msg := fmt.Sprintf("Create shortcut?\n\n%s %s\n\nConsole: %s\nROM: %s",
-		shortcutPrefix, displayName, console.Display, rom.Name)
+	// Step 4: Pick position
+	pos, ok := pickPosition()
+	if !ok {
+		return
+	}
+
+	folderName := buildFolderName(pos, displayName, console.Tag)
+
+	// Step 5: Confirm creation
+	romDesc := rom.Name
+	if rom.IsMultiDisc {
+		romDesc = rom.Name + "  [Multi-disc]"
+	}
+	msg := fmt.Sprintf("Create shortcut?\n\n%s\n\nConsole: %s\nROM: %s",
+		folderName, console.Display, romDesc)
 
 	result, err := gaba.ConfirmationMessage(msg,
 		[]gaba.FooterHelpItem{
@@ -108,16 +156,17 @@ func addROMShortcutFlow() {
 		return
 	}
 
-	// Step 5: Create the shortcut
+	// Step 6: Create the shortcut
+	settings := loadSettings()
 	gaba.ProcessMessage("Creating shortcut...",
 		gaba.ProcessMessageOptions{ShowThemeBackground: true},
 		func() (any, error) {
-			return nil, createROMShortcut(displayName, console.Tag, console.Name, rom.Name)
+			return nil, createROMShortcut(displayName, console.Tag, console.Name, rom, pos, settings)
 		},
 	)
 
 	gaba.ConfirmationMessage(
-		fmt.Sprintf("Shortcut created!\n\n%s %s will appear on\nyour main menu.", shortcutPrefix, displayName),
+		fmt.Sprintf("Shortcut created!\n\n%s\n\nwill appear on your main menu.", folderName),
 		[]gaba.FooterHelpItem{
 			{ButtonName: "A", HelpText: "OK", IsConfirmButton: true},
 		},
@@ -176,7 +225,11 @@ func pickROM(console ConsoleDir) (ROMFile, bool) {
 
 	items := make([]gaba.MenuItem, len(roms))
 	for i, r := range roms {
-		items[i] = gaba.MenuItem{Text: r.Display}
+		text := r.Display
+		if r.IsMultiDisc {
+			text += "  [Multi]"
+		}
+		items[i] = gaba.MenuItem{Text: text}
 	}
 
 	opts := gaba.DefaultListOptions(console.Display, items)
@@ -220,9 +273,17 @@ func addToolShortcutFlow() {
 		return
 	}
 
+	// Pick position
+	pos, ok := pickPosition()
+	if !ok {
+		return
+	}
+
+	folderName := buildFolderName(pos, displayName, bridgeEmuTag)
+
 	// Confirm creation
-	msg := fmt.Sprintf("Create shortcut?\n\n%s %s\n\nTool: %s",
-		shortcutPrefix, displayName, tool.Name)
+	msg := fmt.Sprintf("Create shortcut?\n\n%s\n\nTool: %s",
+		folderName, tool.Name)
 
 	result, err := gaba.ConfirmationMessage(msg,
 		[]gaba.FooterHelpItem{
@@ -238,15 +299,16 @@ func addToolShortcutFlow() {
 	}
 
 	// Create shortcut
+	settings := loadSettings()
 	gaba.ProcessMessage("Creating shortcut...",
 		gaba.ProcessMessageOptions{ShowThemeBackground: true},
 		func() (any, error) {
-			return nil, createToolShortcut(displayName, tool.Path)
+			return nil, createToolShortcut(displayName, tool.Path, pos, settings)
 		},
 	)
 
 	gaba.ConfirmationMessage(
-		fmt.Sprintf("Shortcut created!\n\n%s %s will appear on\nyour main menu.", shortcutPrefix, displayName),
+		fmt.Sprintf("Shortcut created!\n\n%s\n\nwill appear on your main menu.", folderName),
 		[]gaba.FooterHelpItem{
 			{ButtonName: "A", HelpText: "OK", IsConfirmButton: true},
 		},
@@ -423,6 +485,55 @@ func confirmDelete(sc Shortcut) detailAction {
 	)
 
 	return detailActionDeleted
+}
+
+// ── Settings screen ──────────────────────────────────────────
+
+// showSettingsScreen presents the global settings screen.
+// Users cycle Left/Right to change values and press Start to save, or B to discard.
+func showSettingsScreen() {
+	settings := loadSettings()
+
+	initialArtwork := 0
+	if settings.CopyArtwork {
+		initialArtwork = 1
+	}
+
+	items := []gaba.ItemWithOptions{
+		{
+			Item: gaba.MenuItem{Text: "Copy artwork when available"},
+			Options: []gaba.Option{
+				{DisplayName: "Off", Value: false},
+				{DisplayName: "On", Value: true},
+			},
+			SelectedOption: initialArtwork,
+		},
+	}
+
+	listOpts := gaba.OptionListSettings{
+		ConfirmButton: constants.VirtualButtonStart,
+		FooterHelpItems: []gaba.FooterHelpItem{
+			{ButtonName: "B", HelpText: "Back"},
+			{ButtonName: "←/→", HelpText: "Change"},
+			{ButtonName: "Start", HelpText: "Save"},
+		},
+	}
+
+	result, err := gaba.OptionsList("Settings", listOpts, items)
+	if isErrCancelled(err) {
+		return // B pressed — discard changes
+	}
+	if err != nil {
+		logError("settings screen", err)
+		return
+	}
+
+	if result != nil {
+		val, _ := result.Items[0].Options[result.Items[0].SelectedOption].Value.(bool)
+		settings.CopyArtwork = val
+		log.Printf("ui: settings saving: copyArtwork=%v", val)
+		logError("saving settings", saveSettings(settings))
+	}
 }
 
 // ── Utility screens ──────────────────────────────────────────
