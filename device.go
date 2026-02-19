@@ -62,12 +62,13 @@ type ConsoleDir struct {
 	Display string // display name without tag
 }
 
-// ROMFile represents a ROM file or multi-disc game folder within a console directory.
+// ROMFile represents a ROM file or game folder within a console directory.
 type ROMFile struct {
-	Name        string // filename (e.g. "Battletoads (World).md") or dir name for multi-disc
+	Name        string // filename (e.g. "Battletoads (World).md") or dir name for folder-based games
 	Path        string // full path
 	Display     string // display name without extension
 	IsMultiDisc bool   // true if this is a multi-disc folder (subdir containing {name}.m3u)
+	IsCueFolder bool   // true if this is a single-disc folder (subdir containing {name}.cue)
 }
 
 // ToolPak represents a tool .pak directory.
@@ -151,14 +152,22 @@ func scanROMs(consoleDir string) ([]ROMFile, error) {
 		}
 		name := e.Name()
 		if e.IsDir() {
-			// Detect multi-disc games: subdirectory contains {dirName}.m3u
-			m3uPath := filepath.Join(consoleDir, name, name+".m3u")
-			if _, err := os.Stat(m3uPath); err == nil {
+			dirPath := filepath.Join(consoleDir, name)
+			// Multi-disc game: subfolder contains {name}.m3u playlist.
+			if _, err := os.Stat(filepath.Join(dirPath, name+".m3u")); err == nil {
 				roms = append(roms, ROMFile{
 					Name:        name,
-					Path:        filepath.Join(consoleDir, name),
+					Path:        dirPath,
 					Display:     name,
 					IsMultiDisc: true,
+				})
+			} else if _, err := os.Stat(filepath.Join(dirPath, name+".cue")); err == nil {
+				// Single-disc CUE/BIN game: subfolder contains {name}.cue.
+				roms = append(roms, ROMFile{
+					Name:        name,
+					Path:        dirPath,
+					Display:     name,
+					IsCueFolder: true,
 				})
 			}
 			continue
@@ -275,8 +284,8 @@ func scanShortcuts() ([]Shortcut, error) {
 // ── Shortcut creation / removal ──────────────────────────────
 
 // createROMShortcut creates a ROM shortcut folder with m3u and a .shortcut marker.
-// For multi-disc ROMs (rom.IsMultiDisc == true), the m3u points to the multi-disc m3u
-// inside the game's subfolder.
+// For multi-disc ROMs the m3u points to the playlist inside the game subfolder.
+// For CUE folder ROMs the m3u points to the .cue file inside the game subfolder.
 func createROMShortcut(displayName, tag, consoleDirName string, rom ROMFile, pos ShortcutPosition, settings AppSettings) error {
 	romsDir, _, _ := getBasePaths()
 	folderName := buildFolderName(pos, displayName, tag)
@@ -289,9 +298,12 @@ func createROMShortcut(displayName, tag, consoleDirName string, rom ROMFile, pos
 
 	// The relative path from the shortcut folder to the target
 	var relPath string
-	if rom.IsMultiDisc {
+	switch {
+	case rom.IsMultiDisc:
 		relPath = fmt.Sprintf("../%s/%s/%s.m3u", consoleDirName, rom.Name, rom.Name)
-	} else {
+	case rom.IsCueFolder:
+		relPath = fmt.Sprintf("../%s/%s/%s.cue", consoleDirName, rom.Name, rom.Name)
+	default:
 		relPath = fmt.Sprintf("../%s/%s", consoleDirName, rom.Name)
 	}
 
@@ -475,10 +487,10 @@ func generateArtworkBg(artSrcPath, destFolder string) {
 	screenW, screenH := screenDimensions()
 	canvas := image.NewNRGBA(image.Rect(0, 0, screenW, screenH))
 
-	// Fill with dark base colour (visible if global bg is absent or narrow).
+	// Fill with black (fallback when global bg.png is absent or doesn't cover).
 	pix := canvas.Pix
 	for i := 0; i < len(pix); i += 4 {
-		pix[i], pix[i+1], pix[i+2], pix[i+3] = 0x1a, 0x1a, 0x1a, 0xff
+		pix[i], pix[i+1], pix[i+2], pix[i+3] = 0x00, 0x00, 0x00, 0xff
 	}
 
 	// Layer 1: global bg.png scaled to cover the canvas (centre-crop, no letterbox).
@@ -501,20 +513,22 @@ func generateArtworkBg(artSrcPath, destFolder string) {
 		xdraw.Draw(canvas, canvas.Bounds(), scaledBg, image.Point{offX, offY}, xdraw.Src)
 	}
 
-	// Layer 2: game/tool art, scaled to fit thumbnail region, right-aligned at screen midpoint.
-	// Mirrors nextui.c SCREEN_GAMELIST rendering:
-	//   max_w = screen_w * CFG_DEFAULT_GAMEARTWIDTH (0.45)
-	//   max_h = screen_h * 0.60
-	//   target_x = screen_w - new_w - SCALE1(BUTTON_MARGIN*3)  [30 px at scale 2]
+	// Layer 2: game/tool art, right-aligned and vertically centred.
+	//   max_w = screen_w * 0.55  (keep art within right ~55% so left-side menu text is clear)
+	//   max_h = screen_h * 0.70  (taller than the game-list thumbnail so portrait art is wider)
+	//   target_x = screen_w - new_w - right_margin (clamped ≥ 0)
 	//   center_y = screen_h*0.50 - new_h/2
-	maxW := int(float64(screenW) * 0.45)
-	maxH := int(float64(screenH) * 0.60)
+	maxW := int(float64(screenW) * 0.55)
+	maxH := int(float64(screenH) * 0.70)
 	artW, artH := thumbnailFit(artImg.Bounds().Dx(), artImg.Bounds().Dy(), maxW, maxH)
 	scaledArt := image.NewNRGBA(image.Rect(0, 0, artW, artH))
 	xdraw.BiLinear.Scale(scaledArt, scaledArt.Bounds(), artImg, artImg.Bounds(), xdraw.Over, nil)
+	// Rounded corners: effective radius = FIXED_SCALE(2) * CFG_DEFAULT_THUMBRADIUS(20) = 40 px.
+	// Mirrors GFX_ApplyRoundedCorners_8888 in nextui: pixels where dx²+dy²>r² become transparent.
+	applyRoundedCorners(scaledArt, 40)
 
 	const rightMargin = 30 // SCALE1(BUTTON_MARGIN * 3) at FIXED_SCALE=2
-	targetX := screenW - artW - rightMargin
+	targetX := max(0, screenW-artW-rightMargin)
 	centerY := screenH/2 - artH/2
 	artDst := image.Rect(targetX, centerY, targetX+artW, centerY+artH)
 	xdraw.Draw(canvas, artDst, scaledArt, image.Point{}, xdraw.Over)
@@ -567,6 +581,37 @@ func loadPNGImage(path string) (image.Image, error) {
 	return png.Decode(f)
 }
 
+// applyRoundedCorners sets pixels outside the corner arcs to fully transparent.
+// Ports NextUI's GFX_ApplyRoundedCorners_8888: for each corner, pixels where
+// dx²+dy² > radius² (dx/dy = distance past the corner edge) are zeroed.
+func applyRoundedCorners(img *image.NRGBA, radius int) {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if radius <= 0 || w == 0 || h == 0 {
+		return
+	}
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			dx := 0
+			if x < radius {
+				dx = radius - x
+			} else if x >= w-radius {
+				dx = x - (w - radius - 1)
+			}
+			dy := 0
+			if y < radius {
+				dy = radius - y
+			} else if y >= h-radius {
+				dy = y - (h - radius - 1)
+			}
+			if dx*dx+dy*dy > radius*radius {
+				off := img.PixOffset(x, y)
+				img.Pix[off], img.Pix[off+1], img.Pix[off+2], img.Pix[off+3] = 0, 0, 0, 0
+			}
+		}
+	}
+}
+
 // thumbnailFit scales (srcW, srcH) to fit within (maxW, maxH) preserving aspect ratio.
 func thumbnailFit(srcW, srcH, maxW, maxH int) (int, int) {
 	if srcW == 0 || srcH == 0 {
@@ -578,6 +623,65 @@ func thumbnailFit(srcW, srcH, maxW, maxH int) (int, int) {
 		newW = srcW * maxH / srcH
 	}
 	return newW, newH
+}
+
+// shortcutArtSrcPath returns the source artwork PNG path for a shortcut.
+// For tool shortcuts it looks in toolsDir/.media/; for ROM shortcuts it reads
+// the shortcut's .m3u to determine which console folder owns the artwork.
+func shortcutArtSrcPath(sc Shortcut) string {
+	romsDir, toolsDir, _ := getBasePaths()
+	if sc.IsTool {
+		return filepath.Join(toolsDir, ".media", sc.Display+".png")
+	}
+	// Read the m3u inside the shortcut folder to find the console directory.
+	m3uPath := filepath.Join(sc.Path, sc.Name+".m3u")
+	data, err := os.ReadFile(m3uPath)
+	if err != nil {
+		return ""
+	}
+	relPath := strings.TrimSpace(string(data))
+	// relPath is "../Console Dir (TAG)/game.rom" — second component is the console dir.
+	parts := strings.SplitN(relPath, "/", 3)
+	if len(parts) < 2 || parts[0] != ".." {
+		return ""
+	}
+	consoleDirName := parts[1]
+	return filepath.Join(romsDir, consoleDirName, ".media", sc.Display+".png")
+}
+
+// regenerateAllMedia regenerates bg.png for every existing shortcut that has
+// source artwork available, creating .media/ if needed.
+func regenerateAllMedia() error {
+	shortcuts, err := scanShortcuts()
+	if err != nil {
+		return fmt.Errorf("scanning shortcuts: %w", err)
+	}
+	for _, sc := range shortcuts {
+		artSrc := shortcutArtSrcPath(sc)
+		if artSrc != "" {
+			generateArtworkBg(artSrc, sc.Path)
+		}
+	}
+	log.Printf("regenerateAllMedia: processed %d shortcuts", len(shortcuts))
+	return nil
+}
+
+// removeAllMedia removes .media/bg.png from every existing shortcut.
+func removeAllMedia() error {
+	shortcuts, err := scanShortcuts()
+	if err != nil {
+		return fmt.Errorf("scanning shortcuts: %w", err)
+	}
+	for _, sc := range shortcuts {
+		bgPath := filepath.Join(sc.Path, ".media", "bg.png")
+		if err := os.Remove(bgPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("removeAllMedia: remove %s: %v", bgPath, err)
+		}
+		// Remove .media dir if it is now empty.
+		_ = os.Remove(filepath.Join(sc.Path, ".media"))
+	}
+	log.Printf("removeAllMedia: processed %d shortcuts", len(shortcuts))
+	return nil
 }
 
 // ── App settings ─────────────────────────────────────────────

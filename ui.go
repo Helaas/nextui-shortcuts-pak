@@ -17,6 +17,7 @@ const (
 	mainActionAddROM
 	mainActionAddTool
 	mainActionManage
+	mainActionManageMedia
 	mainActionSettings
 )
 
@@ -25,6 +26,7 @@ func showMainMenu() mainAction {
 		{Text: "Add ROM Shortcut"},
 		{Text: "Add Tool Shortcut"},
 		{Text: "Manage Shortcuts"},
+		{Text: "Manage Media"},
 		{Text: "Settings"},
 	}
 
@@ -58,6 +60,9 @@ func showMainMenu() mainAction {
 		log.Printf("ui: main menu -> manage shortcuts")
 		return mainActionManage
 	case 3:
+		log.Printf("ui: main menu -> manage media")
+		return mainActionManageMedia
+	case 4:
 		log.Printf("ui: main menu -> settings")
 		return mainActionSettings
 	default:
@@ -137,8 +142,11 @@ func addROMShortcutFlow() {
 
 	// Step 5: Confirm creation
 	romDesc := rom.Name
-	if rom.IsMultiDisc {
+	switch {
+	case rom.IsMultiDisc:
 		romDesc = rom.Name + "  [Multi-disc]"
+	case rom.IsCueFolder:
+		romDesc = rom.Name + "  [CUE folder]"
 	}
 	msg := fmt.Sprintf("Create shortcut?\n\n%s\n\nConsole: %s\nROM: %s",
 		folderName, console.Display, romDesc)
@@ -226,8 +234,11 @@ func pickROM(console ConsoleDir) (ROMFile, bool) {
 	items := make([]gaba.MenuItem, len(roms))
 	for i, r := range roms {
 		text := r.Display
-		if r.IsMultiDisc {
+		switch {
+		case r.IsMultiDisc:
 			text += "  [Multi]"
+		case r.IsCueFolder:
+			text += "  [CUE]"
 		}
 		items[i] = gaba.MenuItem{Text: text}
 	}
@@ -534,6 +545,91 @@ func showSettingsScreen() {
 		log.Printf("ui: settings saving: copyArtwork=%v", val)
 		logError("saving settings", saveSettings(settings))
 	}
+}
+
+// ── Media management flow ────────────────────────────────────
+
+func manageMediaFlow() {
+	items := []gaba.MenuItem{
+		{Text: "Regenerate all media"},
+		{Text: "Remove all media"},
+	}
+
+	opts := gaba.DefaultListOptions("Manage Media", items)
+	opts.FooterHelpItems = []gaba.FooterHelpItem{
+		{ButtonName: "B", HelpText: "Back"},
+		{ButtonName: "A", HelpText: "Select"},
+	}
+
+	result, err := gaba.List(opts)
+	if isErrCancelled(err) || err != nil || len(result.Selected) == 0 {
+		return
+	}
+
+	switch result.Selected[0] {
+	case 0:
+		regenerateAllMediaFlow()
+	case 1:
+		removeAllMediaFlow()
+	}
+}
+
+func regenerateAllMediaFlow() {
+	msg := "Regenerate media for all shortcuts?\n\nThis will (re)create bg.png for every\nshortcut that has artwork available."
+	confirmed, err := gaba.ConfirmationMessage(msg,
+		[]gaba.FooterHelpItem{
+			{ButtonName: "B", HelpText: "Cancel"},
+			{ButtonName: "A", HelpText: "Regenerate", IsConfirmButton: true},
+		},
+		gaba.MessageOptions{ConfirmButton: constants.VirtualButtonA},
+	)
+	if isErrCancelled(err) || confirmed == nil || !confirmed.Confirmed {
+		return
+	}
+
+	gaba.ProcessMessage("Regenerating media...",
+		gaba.ProcessMessageOptions{ShowThemeBackground: true},
+		func() (any, error) {
+			return nil, regenerateAllMedia()
+		},
+	)
+
+	gaba.ConfirmationMessage(
+		"Media regenerated for all shortcuts.",
+		[]gaba.FooterHelpItem{
+			{ButtonName: "A", HelpText: "OK", IsConfirmButton: true},
+		},
+		gaba.MessageOptions{ConfirmButton: constants.VirtualButtonA},
+	)
+}
+
+func removeAllMediaFlow() {
+	msg := "Remove all media?\n\nThis will delete bg.png from every\nshortcut's .media folder."
+	confirmed, err := gaba.ConfirmationMessage(msg,
+		[]gaba.FooterHelpItem{
+			{ButtonName: "B", HelpText: "Cancel"},
+			{ButtonName: "A", HelpText: "Remove", IsConfirmButton: true},
+		},
+		gaba.MessageOptions{ConfirmButton: constants.VirtualButtonA},
+	)
+	if isErrCancelled(err) || confirmed == nil || !confirmed.Confirmed {
+		return
+	}
+
+	gaba.ProcessMessage("Removing media...",
+		gaba.ProcessMessageOptions{ShowThemeBackground: true},
+		func() (any, error) {
+			return nil, removeAllMedia()
+		},
+	)
+
+	gaba.ConfirmationMessage(
+		"Media removed from all shortcuts.",
+		[]gaba.FooterHelpItem{
+			{ButtonName: "A", HelpText: "OK", IsConfirmButton: true},
+		},
+		gaba.MessageOptions{ConfirmButton: constants.VirtualButtonA},
+	)
 }
 
 // ── Utility screens ──────────────────────────────────────────

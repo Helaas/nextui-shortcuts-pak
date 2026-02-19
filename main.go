@@ -58,6 +58,8 @@ func runApp() {
 			addToolShortcutFlow()
 		case mainActionManage:
 			manageShortcutsFlow()
+		case mainActionManageMedia:
+			manageMediaFlow()
 		case mainActionSettings:
 			showSettingsScreen()
 		case mainActionQuit:
