@@ -3,12 +3,15 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
+	"image"
+	"image/png"
 	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	xdraw "golang.org/x/image/draw"
 )
 
 // ── Device paths ─────────────────────────────────────────────
@@ -303,7 +306,7 @@ func createROMShortcut(displayName, tag, consoleDirName string, rom ROMFile, pos
 
 	if settings.CopyArtwork {
 		artworkSrc := filepath.Join(romsDir, consoleDirName, ".media", displayName+".png")
-		copyArtworkIfExists(artworkSrc, folderPath)
+		generateArtworkBg(artworkSrc, folderPath)
 	}
 
 	log.Printf("createROMShortcut: created folder=%s", folderPath)
@@ -339,7 +342,7 @@ func createToolShortcut(displayName, pakPath string, pos ShortcutPosition, setti
 
 	if settings.CopyArtwork {
 		artworkSrc := filepath.Join(toolsDir, ".media", displayName+".png")
-		copyArtworkIfExists(artworkSrc, folderPath)
+		generateArtworkBg(artworkSrc, folderPath)
 	}
 
 	log.Printf("createToolShortcut: created folder=%s", folderPath)
@@ -454,33 +457,127 @@ func buildFolderName(pos ShortcutPosition, displayName, tag string) string {
 	}
 }
 
-// copyArtworkIfExists copies srcPath to {destFolder}/.media/bg.png if srcPath exists.
-// Silently does nothing if the source file is missing.
-func copyArtworkIfExists(srcPath, destFolder string) {
-	if _, err := os.Stat(srcPath); err != nil {
-		return // source not found — silently skip
+// generateArtworkBg composites a fullscreen bg.png for a shortcut's .media/ folder.
+// It renders the device's global /mnt/SDCARD/bg.png as the base, then overlays artSrcPath
+// scaled to match NextUI's thumbnail dimensions (screen_w*0.45 × screen_h*0.60, right-aligned,
+// vertically centred at 50% screen height — identical to SCREEN_GAMELIST thumbnail rendering).
+// Does nothing if artSrcPath does not exist.
+func generateArtworkBg(artSrcPath, destFolder string) {
+	if _, err := os.Stat(artSrcPath); err != nil {
+		return // no art — skip silently
 	}
+	artImg, err := loadPNGImage(artSrcPath)
+	if err != nil {
+		log.Printf("generateArtworkBg: load art: %v", err)
+		return
+	}
+
+	screenW, screenH := screenDimensions()
+	canvas := image.NewNRGBA(image.Rect(0, 0, screenW, screenH))
+
+	// Fill with dark base colour (visible if global bg is absent or narrow).
+	pix := canvas.Pix
+	for i := 0; i < len(pix); i += 4 {
+		pix[i], pix[i+1], pix[i+2], pix[i+3] = 0x1a, 0x1a, 0x1a, 0xff
+	}
+
+	// Layer 1: global bg.png scaled to cover the canvas (centre-crop, no letterbox).
+	bgPath := globalBgPath()
+	if bgImg, err := loadPNGImage(bgPath); err == nil {
+		srcW, srcH := bgImg.Bounds().Dx(), bgImg.Bounds().Dy()
+		scaleX := float64(screenW) / float64(srcW)
+		scaleY := float64(screenH) / float64(srcH)
+		scale := scaleX
+		if scaleY > scaleX {
+			scale = scaleY
+		}
+		newW := int(float64(srcW) * scale)
+		newH := int(float64(srcH) * scale)
+		scaledBg := image.NewNRGBA(image.Rect(0, 0, newW, newH))
+		xdraw.BiLinear.Scale(scaledBg, scaledBg.Bounds(), bgImg, bgImg.Bounds(), xdraw.Src, nil)
+		// Centre-crop: offset into scaledBg so the canvas window is centred.
+		offX := (newW - screenW) / 2
+		offY := (newH - screenH) / 2
+		xdraw.Draw(canvas, canvas.Bounds(), scaledBg, image.Point{offX, offY}, xdraw.Src)
+	}
+
+	// Layer 2: game/tool art, scaled to fit thumbnail region, right-aligned at screen midpoint.
+	// Mirrors nextui.c SCREEN_GAMELIST rendering:
+	//   max_w = screen_w * CFG_DEFAULT_GAMEARTWIDTH (0.45)
+	//   max_h = screen_h * 0.60
+	//   target_x = screen_w - new_w - SCALE1(BUTTON_MARGIN*3)  [30 px at scale 2]
+	//   center_y = screen_h*0.50 - new_h/2
+	maxW := int(float64(screenW) * 0.45)
+	maxH := int(float64(screenH) * 0.60)
+	artW, artH := thumbnailFit(artImg.Bounds().Dx(), artImg.Bounds().Dy(), maxW, maxH)
+	scaledArt := image.NewNRGBA(image.Rect(0, 0, artW, artH))
+	xdraw.BiLinear.Scale(scaledArt, scaledArt.Bounds(), artImg, artImg.Bounds(), xdraw.Over, nil)
+
+	const rightMargin = 30 // SCALE1(BUTTON_MARGIN * 3) at FIXED_SCALE=2
+	targetX := screenW - artW - rightMargin
+	centerY := screenH/2 - artH/2
+	artDst := image.Rect(targetX, centerY, targetX+artW, centerY+artH)
+	xdraw.Draw(canvas, artDst, scaledArt, image.Point{}, xdraw.Over)
+
+	// Save composite.
 	mediaDir := filepath.Join(destFolder, ".media")
 	if err := os.MkdirAll(mediaDir, 0755); err != nil {
-		log.Printf("copyArtworkIfExists: could not create .media dir: %v", err)
+		log.Printf("generateArtworkBg: mkdir .media: %v", err)
 		return
 	}
-	src, err := os.Open(srcPath)
+	f, err := os.Create(filepath.Join(mediaDir, "bg.png"))
 	if err != nil {
-		log.Printf("copyArtworkIfExists: open src: %v", err)
+		log.Printf("generateArtworkBg: create bg.png: %v", err)
 		return
 	}
-	defer src.Close()
-	dst, err := os.Create(filepath.Join(mediaDir, "bg.png"))
+	defer f.Close()
+	if err := png.Encode(f, canvas); err != nil {
+		log.Printf("generateArtworkBg: encode: %v", err)
+	}
+	log.Printf("generateArtworkBg: %s/.media/bg.png (%dx%d art=%dx%d)", destFolder, screenW, screenH, artW, artH)
+}
+
+// screenDimensions returns the native screen size for the current platform.
+// TG5040 Smart Pro and TG5050 are both 1280×720. The TG5040 Brick is 1024×768 but
+// cannot be detected at runtime; NextUI scales bg.png with aspect-ratio preservation.
+func screenDimensions() (int, int) {
+	return 1280, 720
+}
+
+// globalBgPath returns the path to the device's global background image.
+func globalBgPath() string {
+	sdcard := os.Getenv("SDCARD_PATH")
+	if sdcard == "" {
+		if platform == PlatformMac {
+			cwd, _ := os.Getwd()
+			return filepath.Join(cwd, "mock_sdcard", "bg.png")
+		}
+		return "/mnt/SDCARD/bg.png"
+	}
+	return filepath.Join(sdcard, "bg.png")
+}
+
+// loadPNGImage opens and decodes a PNG file.
+func loadPNGImage(path string) (image.Image, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		log.Printf("copyArtworkIfExists: create dst: %v", err)
-		return
+		return nil, err
 	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, src); err != nil {
-		log.Printf("copyArtworkIfExists: copy: %v", err)
+	defer f.Close()
+	return png.Decode(f)
+}
+
+// thumbnailFit scales (srcW, srcH) to fit within (maxW, maxH) preserving aspect ratio.
+func thumbnailFit(srcW, srcH, maxW, maxH int) (int, int) {
+	if srcW == 0 || srcH == 0 {
+		return maxW, maxH
 	}
-	log.Printf("copyArtworkIfExists: copied %s -> %s/.media/bg.png", srcPath, destFolder)
+	newW, newH := maxW, srcH*maxW/srcW
+	if newH > maxH {
+		newH = maxH
+		newW = srcW * maxH / srcH
+	}
+	return newW, newH
 }
 
 // ── App settings ─────────────────────────────────────────────
