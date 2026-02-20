@@ -26,7 +26,7 @@ func showMainMenu() mainAction {
 		{Text: "Add ROM Shortcut"},
 		{Text: "Add Tool Shortcut"},
 		{Text: "Manage Shortcuts"},
-		{Text: "Manage Media"},
+		{Text: "Manage Artwork"},
 		{Text: "Settings"},
 	}
 
@@ -60,7 +60,7 @@ func showMainMenu() mainAction {
 		log.Printf("ui: main menu -> manage shortcuts")
 		return mainActionManage
 	case 3:
-		log.Printf("ui: main menu -> manage media")
+		log.Printf("ui: main menu -> manage artwork")
 		return mainActionManageMedia
 	case 4:
 		log.Printf("ui: main menu -> settings")
@@ -511,23 +511,13 @@ func confirmDelete(sc Shortcut) detailAction {
 // ── Settings screen ──────────────────────────────────────────
 
 // showSettingsScreen presents the global settings screen.
-// Users cycle Left/Right to change values and press Start to save, or B to discard.
+// Users cycle Left/Right to change values and press A to save, or B to discard.
 func showSettingsScreen() {
 	settings := loadSettings()
 
 	initialArtwork := 0
 	if settings.CopyArtwork {
 		initialArtwork = 1
-	}
-
-	initialBg := 1 // default: use device bg.png
-	if !settings.UseGlobalBg {
-		initialBg = 0
-	}
-
-	initialForceBlack := 0
-	if settings.ForceBlackBg {
-		initialForceBlack = 1
 	}
 
 	initialShowHidden := 0
@@ -545,23 +535,16 @@ func showSettingsScreen() {
 			SelectedOption: initialArtwork,
 		},
 		{
-			Item: gaba.MenuItem{Text: "Artwork background"},
+			Item: gaba.MenuItem{Text: "Artwork mode"},
 			Options: []gaba.Option{
-				{DisplayName: "Black", Value: false},
-				{DisplayName: "Device bg.png", Value: true},
+				{DisplayName: "Art on Black background", Value: ArtworkModeBlack},
+				{DisplayName: "Art on Main menu Wallpaper", Value: ArtworkModeWallpaper},
+				{DisplayName: "Fallback to wallpaper", Value: ArtworkModeFallback},
 			},
-			SelectedOption: initialBg,
+			SelectedOption: settings.ArtworkMode,
 		},
 		{
-			Item: gaba.MenuItem{Text: "Force black bg if no artwork"},
-			Options: []gaba.Option{
-				{DisplayName: "Off", Value: false},
-				{DisplayName: "On", Value: true},
-			},
-			SelectedOption: initialForceBlack,
-		},
-		{
-			Item: gaba.MenuItem{Text: "Show hidden/disabled"},
+			Item: gaba.MenuItem{Text: "Show hidden/disabled/empty ROMs"},
 			Options: []gaba.Option{
 				{DisplayName: "Off", Value: false},
 				{DisplayName: "On", Value: true},
@@ -571,11 +554,11 @@ func showSettingsScreen() {
 	}
 
 	listOpts := gaba.OptionListSettings{
-		ConfirmButton: constants.VirtualButtonStart,
+		ConfirmButton: constants.VirtualButtonA,
 		FooterHelpItems: []gaba.FooterHelpItem{
 			{ButtonName: "B", HelpText: "Back"},
 			{ButtonName: "←/→", HelpText: "Change"},
-			{ButtonName: "Start", HelpText: "Save"},
+			{ButtonName: "A", HelpText: "Save"},
 		},
 	}
 
@@ -590,10 +573,10 @@ func showSettingsScreen() {
 
 	if result != nil {
 		settings.CopyArtwork, _ = result.Items[0].Options[result.Items[0].SelectedOption].Value.(bool)
-		settings.UseGlobalBg, _ = result.Items[1].Options[result.Items[1].SelectedOption].Value.(bool)
-		settings.ForceBlackBg, _ = result.Items[2].Options[result.Items[2].SelectedOption].Value.(bool)
-		settings.ShowHidden, _ = result.Items[3].Options[result.Items[3].SelectedOption].Value.(bool)
-		log.Printf("ui: settings saving: copyArtwork=%v useGlobalBg=%v forceBlackBg=%v showHidden=%v", settings.CopyArtwork, settings.UseGlobalBg, settings.ForceBlackBg, settings.ShowHidden)
+		settings.ArtworkMode, _ = result.Items[1].Options[result.Items[1].SelectedOption].Value.(int)
+		settings.ShowHidden, _ = result.Items[2].Options[result.Items[2].SelectedOption].Value.(bool)
+		log.Printf("ui: settings saving: copyArtwork=%v artworkMode=%d showHidden=%v",
+			settings.CopyArtwork, settings.ArtworkMode, settings.ShowHidden)
 		logError("saving settings", saveSettings(settings))
 	}
 }
@@ -602,11 +585,11 @@ func showSettingsScreen() {
 
 func manageMediaFlow() {
 	items := []gaba.MenuItem{
-		{Text: "Regenerate all media"},
-		{Text: "Remove all media"},
+		{Text: "Regenerate artwork"},
+		{Text: "Remove artwork"},
 	}
 
-	opts := gaba.DefaultListOptions("Manage Media", items)
+	opts := gaba.DefaultListOptions("Manage Artwork", items)
 	opts.FooterHelpItems = []gaba.FooterHelpItem{
 		{ButtonName: "B", HelpText: "Back"},
 		{ButtonName: "A", HelpText: "Select"},
@@ -626,7 +609,7 @@ func manageMediaFlow() {
 }
 
 func regenerateAllMediaFlow() {
-	msg := "Regenerate media for all shortcuts?\n\nThis will (re)create bg.png for every\nshortcut that has artwork available."
+	msg := "Regenerate artwork for all shortcuts?\n\nThis will (re)create bg.png for every\nshortcut using the current Artwork mode."
 	confirmed, err := gaba.ConfirmationMessage(msg,
 		[]gaba.FooterHelpItem{
 			{ButtonName: "B", HelpText: "Cancel"},
@@ -639,7 +622,7 @@ func regenerateAllMediaFlow() {
 	}
 
 	settings := loadSettings()
-	gaba.ProcessMessage("Regenerating media...",
+	gaba.ProcessMessage("Regenerating artwork...",
 		gaba.ProcessMessageOptions{ShowThemeBackground: true},
 		func() (any, error) {
 			return nil, regenerateAllMedia(settings)
@@ -647,7 +630,7 @@ func regenerateAllMediaFlow() {
 	)
 
 	gaba.ConfirmationMessage(
-		"Media regenerated for all shortcuts.",
+		"Artwork regenerated for all shortcuts.",
 		[]gaba.FooterHelpItem{
 			{ButtonName: "A", HelpText: "OK", IsConfirmButton: true},
 		},
@@ -656,7 +639,7 @@ func regenerateAllMediaFlow() {
 }
 
 func removeAllMediaFlow() {
-	msg := "Remove all media?\n\nThis will delete bg.png from every\nshortcut's .media folder."
+	msg := "Remove all artwork?\n\nThis will delete bg.png from every\nshortcut's .media folder."
 	confirmed, err := gaba.ConfirmationMessage(msg,
 		[]gaba.FooterHelpItem{
 			{ButtonName: "B", HelpText: "Cancel"},
@@ -668,7 +651,7 @@ func removeAllMediaFlow() {
 		return
 	}
 
-	gaba.ProcessMessage("Removing media...",
+	gaba.ProcessMessage("Removing artwork...",
 		gaba.ProcessMessageOptions{ShowThemeBackground: true},
 		func() (any, error) {
 			return nil, removeAllMedia()
@@ -676,7 +659,7 @@ func removeAllMediaFlow() {
 	)
 
 	gaba.ConfirmationMessage(
-		"Media removed from all shortcuts.",
+		"Artwork removed from all shortcuts.",
 		[]gaba.FooterHelpItem{
 			{ButtonName: "A", HelpText: "OK", IsConfirmButton: true},
 		},

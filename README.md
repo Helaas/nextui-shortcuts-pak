@@ -30,7 +30,7 @@ Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050
    - **Add ROM Shortcut**
    - **Add Tool Shortcut**
    - **Manage Shortcuts**
-   - **Manage Media**
+   - **Manage Artwork**
    - **Settings**
 3. Follow the on-screen prompts
 
@@ -54,22 +54,45 @@ Browse installed Tools (`.pak` directories), pick one, choose a sort position, a
 
 Browse all existing shortcuts. Select one to view details (name, type, tag, target path) and optionally delete it.
 
-### Manage Media
+### Manage Artwork
 
 Bulk artwork operations for all shortcuts:
 
 | Option | Effect |
 |--------|--------|
-| **Regenerate all media** | Creates or replaces `bg.png` in every shortcut's `.media/` folder from its source artwork |
-| **Remove all media** | Deletes `bg.png` (and the `.media/` folder if empty) from every shortcut |
+| **Regenerate artwork** | Creates or replaces `bg.png` in every shortcut's `.media/` folder using the current Artwork mode settings |
+| **Remove artwork** | Deletes `bg.png` (and `.media/` if empty) from every shortcut |
 
 ### Settings
 
 | Option | Values | Default |
 |--------|--------|---------|
-| Copy artwork when available | Off / On | Off |
+| Copy artwork when available | Off / On | **On** |
+| Artwork mode | Art on Black background / Art on Main menu Wallpaper / Fallback to wallpaper | **Art on Main menu Wallpaper** |
+| Show hidden/disabled/empty ROMs | Off / On | **Off** |
 
-When **Copy artwork** is enabled, creating a new shortcut will automatically generate a `bg.png` background image in the shortcut's `.media/` folder.
+#### Copy artwork when available
+
+When **On**, creating a new shortcut automatically generates a `bg.png` background image for it (using the current Artwork mode). Turn this **Off** if you prefer to manage backgrounds manually or want faster shortcut creation.
+
+#### Artwork mode
+
+Controls how `bg.png` is generated when a shortcut is created or artwork is regenerated:
+
+- **Art on Black background** — The artwork is placed on a solid black canvas. If the shortcut has no artwork, a plain black `bg.png` is still created so the background is consistent.
+
+- **Art on Main menu Wallpaper** — The artwork is composited over your device's main menu wallpaper (`/mnt/SDCARD/bg.png`). If the shortcut has no artwork, a copy of the wallpaper alone is used so the background still matches your theme.
+
+- **Fallback to wallpaper** — Same as Art on Main menu Wallpaper when artwork exists. If a shortcut has no artwork, **no `bg.png` is created at all** and NextUI shows its default background for that entry.
+
+#### Show hidden/disabled/empty ROMs
+
+When **Off** (default), the ROM and console pickers hide:
+- Folders and files that start with `.` (dot-prefixed)
+- Folders and files that end in `.disabled`
+- Console folders whose only contents are system dot-files (empty to the user)
+
+Turn this **On** to make those entries visible and selectable. Mac system folders (`.DS_Store`, `.Spotlight-V100`, etc.) are always hidden regardless of this setting.
 
 ## Shortcut Position
 
@@ -77,7 +100,7 @@ When creating a shortcut you choose where it sorts in the NextUI main menu:
 
 | Position | Folder prefix | Effect |
 |----------|--------------|--------|
-| **Bottom** (default) | U+200B (invisible) | Appears after Z; NextUI displays the name with no visible prefix |
+| **Bottom** (default) | U+FEFF (invisible) | Appears after Z; NextUI displays the name with no visible prefix |
 | **Top** | `0) ` | Appears before A; NextUI's `trimSortingMeta` strips `0) ` at render time |
 | **Alphabetical** | _(none)_ | Sorts with everything else by name |
 
@@ -85,8 +108,8 @@ When creating a shortcut you choose where it sorts in the NextUI main menu:
 
 ROM shortcut structure:
 ```
-/mnt/SDCARD/Roms/<ZWS>Name (TAG)/
-  <ZWS>Name (TAG).m3u     ← relative path to the real ROM  (<ZWS> = U+200B, invisible)
+/mnt/SDCARD/Roms/<BOM>Name (TAG)/
+  <BOM>Name (TAG).m3u     ← relative path to the real ROM  (<BOM> = U+FEFF, invisible)
   .shortcut               ← clean display name (used by Shortcuts pak)
   .media/
     bg.png                ← generated fullscreen background (optional)
@@ -102,8 +125,8 @@ ROM shortcut structure:
 
 Tool shortcut structure:
 ```
-/mnt/SDCARD/Roms/<ZWS>Name (SHORTCUT)/
-  <ZWS>Name (SHORTCUT).m3u  ← contains "target"  (<ZWS> = U+200B, invisible)
+/mnt/SDCARD/Roms/<BOM>Name (SHORTCUT)/
+  <BOM>Name (SHORTCUT).m3u  ← contains "target"  (<BOM> = U+FEFF, invisible)
   target                     ← full path to the tool .pak directory
   .shortcut                  ← clean display name
   .media/
@@ -112,7 +135,7 @@ Tool shortcut structure:
 
 ## Artwork / bg.png Generation
 
-When artwork copying is enabled (or via **Manage Media → Regenerate all media**), the pak generates a native-resolution `bg.png` for each shortcut (1280×720 on Smart Pro / TG5050, 1024×768 on Brick):
+When artwork copying is enabled (or via **Manage Artwork → Regenerate artwork**), the pak generates a native-resolution `bg.png` for each shortcut (1280×720 on Smart Pro / TG5050, 1024×768 on Brick):
 
 1. **Base layer** — the device's global `/mnt/SDCARD/bg.png` scaled to cover the canvas (centre-cropped)
 2. **Art layer** — the game/tool artwork scaled to fit `45% × screen width` × `60% × screen height` (matching NextUI's game-list thumbnail dimensions), preserving aspect ratio, right-aligned and vertically centred, with rounded corners

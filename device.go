@@ -402,7 +402,8 @@ func createROMShortcut(displayName, tag, consoleDirName string, rom ROMFile, pos
 
 	if settings.CopyArtwork {
 		artworkSrc := filepath.Join(romsDir, consoleDirName, ".media", displayName+".png")
-		generateArtworkBg(artworkSrc, folderPath, settings.UseGlobalBg, settings.ForceBlackBg)
+		useGlobalBg, forceBlack := settings.artworkBgParams()
+		generateArtworkBg(artworkSrc, folderPath, useGlobalBg, forceBlack)
 	}
 
 	log.Printf("createROMShortcut: created folder=%s", folderPath)
@@ -438,7 +439,8 @@ func createToolShortcut(displayName, pakPath string, pos ShortcutPosition, setti
 
 	if settings.CopyArtwork {
 		artworkSrc := filepath.Join(toolsDir, ".media", displayName+".png")
-		generateArtworkBg(artworkSrc, folderPath, settings.UseGlobalBg, settings.ForceBlackBg)
+		useGlobalBg, forceBlack := settings.artworkBgParams()
+		generateArtworkBg(artworkSrc, folderPath, useGlobalBg, forceBlack)
 	}
 
 	log.Printf("createToolShortcut: created folder=%s", folderPath)
@@ -784,11 +786,10 @@ func regenerateAllMedia(settings AppSettings) error {
 	if err != nil {
 		return fmt.Errorf("scanning shortcuts: %w", err)
 	}
+	useGlobalBg, forceBlack := settings.artworkBgParams()
 	for _, sc := range shortcuts {
 		artSrc := shortcutArtSrcPath(sc)
-		if artSrc != "" || settings.ForceBlackBg {
-			generateArtworkBg(artSrc, sc.Path, settings.UseGlobalBg, settings.ForceBlackBg)
-		}
+		generateArtworkBg(artSrc, sc.Path, useGlobalBg, forceBlack)
 	}
 	log.Printf("regenerateAllMedia: processed %d shortcuts", len(shortcuts))
 	return nil
@@ -814,12 +815,30 @@ func removeAllMedia() error {
 
 // ── App settings ─────────────────────────────────────────────
 
+// ArtworkMode controls how bg.png is generated for shortcuts.
+const (
+	ArtworkModeBlack    = 0 // Art on black canvas; always writes bg.png (black if no art)
+	ArtworkModeWallpaper = 1 // Art on device wallpaper; always writes bg.png (wallpaper copy if no art)
+	ArtworkModeFallback  = 2 // Art on device wallpaper; skips bg.png entirely when no art exists
+)
+
 // AppSettings holds persistent user preferences.
 type AppSettings struct {
-	CopyArtwork  bool `json:"copy_artwork"`
-	UseGlobalBg  bool `json:"use_global_bg"`
-	ForceBlackBg bool `json:"force_black_bg"`
-	ShowHidden   bool `json:"show_hidden"`
+	CopyArtwork bool `json:"copy_artwork"`
+	ArtworkMode int  `json:"artwork_mode"` // see ArtworkMode* constants
+	ShowHidden  bool `json:"show_hidden"`
+}
+
+// artworkBgParams returns the (useGlobalBg, forceBlack) arguments for generateArtworkBg.
+func (s AppSettings) artworkBgParams() (useGlobalBg, forceBlack bool) {
+	switch s.ArtworkMode {
+	case ArtworkModeWallpaper:
+		return true, true
+	case ArtworkModeFallback:
+		return true, false
+	default: // ArtworkModeBlack
+		return false, true
+	}
 }
 
 // getSettingsPath returns the path to the settings JSON file.
@@ -838,7 +857,7 @@ func getSettingsPath() string {
 
 // loadSettings reads settings from disk. Returns defaults on any error (missing file, parse error).
 func loadSettings() AppSettings {
-	defaults := AppSettings{CopyArtwork: false, UseGlobalBg: true, ForceBlackBg: false, ShowHidden: false}
+	defaults := AppSettings{CopyArtwork: true, ArtworkMode: ArtworkModeWallpaper, ShowHidden: false}
 	data, err := os.ReadFile(getSettingsPath())
 	if err != nil {
 		return defaults
