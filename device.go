@@ -65,19 +65,21 @@ const shortcutMarkerFile = ".shortcut"
 
 // ConsoleDir represents a ROM console directory.
 type ConsoleDir struct {
-	Name    string // e.g. "Sega Genesis (MD)"
-	Tag     string // e.g. "MD"
-	Path    string // full path to the directory
-	Display string // display name without tag
+	Name       string // e.g. "Sega Genesis (MD)" or "Sega Genesis (MD).disabled"
+	Tag        string // e.g. "MD"
+	Path       string // full path to the directory
+	Display    string // display name without tag
+	IsDisabled bool   // true if the folder name ends with .disabled
 }
 
 // ROMFile represents a ROM file or game folder within a console directory.
 type ROMFile struct {
 	Name        string // filename (e.g. "Battletoads (World).md") or dir name for folder-based games
 	Path        string // full path
-	Display     string // display name without extension
+	Display     string // display name without extension (no [disabled] suffix — used for artwork lookup)
 	IsMultiDisc bool   // true if this is a multi-disc folder (subdir containing {name}.m3u)
 	IsCueFolder bool   // true if this is a single-disc folder (subdir containing {name}.cue)
+	IsDisabled  bool   // true if the entry ends with .disabled (visible only when ShowHidden is on)
 }
 
 // ToolPak represents a tool .pak directory.
@@ -115,7 +117,11 @@ func getBasePaths() (roms, tools, emus string) {
 }
 
 // scanConsoleDirs returns all ROM console directories (non-shortcut).
-func scanConsoleDirs() ([]ConsoleDir, error) {
+// When showHidden is false (default): dot-prefixed and .disabled folders are skipped,
+// and console dirs with no visible ROM content are also skipped.
+// When showHidden is true: .disabled folders and dot-dirs that have a (TAG) suffix are
+// included; empty dirs are shown; Mac dotfiles (dot-dirs without a tag) are still excluded.
+func scanConsoleDirs(showHidden bool) ([]ConsoleDir, error) {
 	romsDir, _, _ := getBasePaths()
 	entries, err := os.ReadDir(romsDir)
 	if err != nil {
@@ -124,31 +130,63 @@ func scanConsoleDirs() ([]ConsoleDir, error) {
 
 	var consoles []ConsoleDir
 	for _, e := range entries {
-		if !e.IsDir() || isHidden(e.Name()) || isShortcutFolder(filepath.Join(romsDir, e.Name())) {
+		if !e.IsDir() {
 			continue
 		}
 		name := e.Name()
-		tag := extractTag(name)
+		fullPath := filepath.Join(romsDir, name)
+
+		if isShortcutFolder(fullPath) {
+			continue
+		}
+
+		if !showHidden {
+			if isHidden(name) {
+				continue
+			}
+			// Skip console dirs with no visible ROM content (empty or dotfiles only).
+			if !dirHasVisibleContent(fullPath) {
+				continue
+			}
+		} else {
+			// With showHidden: still exclude Mac dotfiles (dot-dirs without a (TAG)).
+			if isMacDotfile(name) || name == "map.txt" {
+				continue
+			}
+		}
+
+		// For .disabled folders strip the suffix before extracting tag/display.
+		isDisabled := strings.HasSuffix(name, ".disabled")
+		baseName := name
+		if isDisabled {
+			baseName = strings.TrimSuffix(name, ".disabled")
+		}
+
+		tag := extractTag(baseName)
 		if tag == "" {
 			continue // no emu tag — skip
 		}
 		consoles = append(consoles, ConsoleDir{
-			Name:    name,
-			Tag:     tag,
-			Path:    filepath.Join(romsDir, name),
-			Display: extractDisplayName(name),
+			Name:       name,
+			Tag:        tag,
+			Path:       fullPath,
+			Display:    extractDisplayName(baseName),
+			IsDisabled: isDisabled,
 		})
 	}
 
 	sort.Slice(consoles, func(i, j int) bool {
 		return strings.ToLower(consoles[i].Display) < strings.ToLower(consoles[j].Display)
 	})
-	log.Printf("scanConsoleDirs: found %d console folders", len(consoles))
+	log.Printf("scanConsoleDirs: showHidden=%v found %d console folders", showHidden, len(consoles))
 	return consoles, nil
 }
 
 // scanROMs returns all ROM files in a console directory.
-func scanROMs(consoleDir string) ([]ROMFile, error) {
+// When showHidden is false (default): hidden and .disabled entries are skipped.
+// When showHidden is true: .disabled entries are included with IsDisabled set; known
+// Mac artifacts (.DS_Store, map.txt, etc.) are always excluded.
+func scanROMs(consoleDir string, showHidden bool) ([]ROMFile, error) {
 	entries, err := os.ReadDir(consoleDir)
 	if err != nil {
 		return nil, fmt.Errorf("reading rom dir: %w", err)
@@ -156,47 +194,67 @@ func scanROMs(consoleDir string) ([]ROMFile, error) {
 
 	var roms []ROMFile
 	for _, e := range entries {
-		if isHidden(e.Name()) {
-			continue
-		}
 		name := e.Name()
+
+		if !showHidden {
+			if isHidden(name) {
+				continue
+			}
+		} else {
+			// Always skip Mac/system artifacts regardless of showHidden.
+			if strings.HasPrefix(name, ".") || name == "map.txt" {
+				continue
+			}
+		}
+
+		// Strip .disabled suffix for display/artwork lookup; mark entry as disabled.
+		isDisabled := strings.HasSuffix(name, ".disabled")
+		baseName := name
+		if isDisabled {
+			baseName = strings.TrimSuffix(name, ".disabled")
+		}
+
 		if e.IsDir() {
 			dirPath := filepath.Join(consoleDir, name)
-			// Multi-disc game: subfolder contains {name}.m3u playlist.
-			if _, err := os.Stat(filepath.Join(dirPath, name+".m3u")); err == nil {
+			// Multi-disc: subfolder contains {baseName}.m3u playlist.
+			if _, err := os.Stat(filepath.Join(dirPath, baseName+".m3u")); err == nil {
 				roms = append(roms, ROMFile{
 					Name:        name,
 					Path:        dirPath,
-					Display:     name,
+					Display:     baseName,
 					IsMultiDisc: true,
+					IsDisabled:  isDisabled,
 				})
-			} else if _, err := os.Stat(filepath.Join(dirPath, name+".cue")); err == nil {
-				// Single-disc CUE/BIN game: subfolder contains {name}.cue.
+			} else if _, err := os.Stat(filepath.Join(dirPath, baseName+".cue")); err == nil {
+				// Single-disc CUE/BIN: subfolder contains {baseName}.cue.
 				roms = append(roms, ROMFile{
 					Name:        name,
 					Path:        dirPath,
-					Display:     name,
+					Display:     baseName,
 					IsCueFolder: true,
+					IsDisabled:  isDisabled,
 				})
 			}
 			continue
 		}
 		roms = append(roms, ROMFile{
-			Name:    name,
-			Path:    filepath.Join(consoleDir, name),
-			Display: stripExtension(name),
+			Name:       name,
+			Path:       filepath.Join(consoleDir, name),
+			Display:    stripExtension(baseName),
+			IsDisabled: isDisabled,
 		})
 	}
 
 	sort.Slice(roms, func(i, j int) bool {
 		return strings.ToLower(roms[i].Display) < strings.ToLower(roms[j].Display)
 	})
-	log.Printf("scanROMs: dir=%s roms=%d", consoleDir, len(roms))
+	log.Printf("scanROMs: dir=%s showHidden=%v roms=%d", consoleDir, showHidden, len(roms))
 	return roms, nil
 }
 
 // scanTools returns all tool .pak directories for the current platform.
-func scanTools() ([]ToolPak, error) {
+// When showHidden is true, .pak.disabled entries are also included.
+func scanTools(showHidden bool) ([]ToolPak, error) {
 	_, toolsDir, _ := getBasePaths()
 	entries, err := os.ReadDir(toolsDir)
 	if err != nil {
@@ -205,18 +263,34 @@ func scanTools() ([]ToolPak, error) {
 
 	var tools []ToolPak
 	for _, e := range entries {
-		if !e.IsDir() || isHidden(e.Name()) {
+		if !e.IsDir() {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasSuffix(name, ".pak") {
+		if !showHidden && isHidden(name) {
 			continue
 		}
-		displayName := strings.TrimSuffix(name, ".pak")
+		if showHidden && strings.HasPrefix(name, ".") {
+			continue // always skip dot-dirs in Tools
+		}
+
+		// Accept both .pak and .pak.disabled
+		isDisabled := strings.HasSuffix(name, ".pak.disabled")
+		if !strings.HasSuffix(name, ".pak") && !isDisabled {
+			continue
+		}
+		baseName := strings.TrimSuffix(name, ".pak")
+		if isDisabled {
+			baseName = strings.TrimSuffix(strings.TrimSuffix(name, ".disabled"), ".pak")
+		}
+		display := baseName
+		if isDisabled {
+			display += "  [disabled]"
+		}
 		tools = append(tools, ToolPak{
-			Name:    displayName,
+			Name:    baseName,
 			Path:    filepath.Join(toolsDir, name),
-			Display: displayName,
+			Display: display,
 		})
 	}
 
@@ -416,6 +490,33 @@ func isHidden(name string) bool {
 	return strings.HasPrefix(name, ".") ||
 		strings.HasSuffix(name, ".disabled") ||
 		name == "map.txt"
+}
+
+// isMacDotfile returns true for dot-prefixed names that are Mac/system artifacts
+// rather than user-created hidden content. Used when ShowHidden is on to avoid
+// surfacing .DS_Store, .Spotlight-V100, etc. while still showing user-hidden folders.
+func isMacDotfile(name string) bool {
+	if !strings.HasPrefix(name, ".") {
+		return false
+	}
+	// Any dot-dir that also has a (TAG) suffix is likely a user-created hidden console —
+	// show it. Everything else (no tag) is treated as system/Mac cruft.
+	return extractTag(name) == ""
+}
+
+// dirHasVisibleContent reports whether dir contains at least one entry that is not hidden.
+// Used to skip empty or dot-file-only console folders when ShowHidden is off.
+func dirHasVisibleContent(path string) bool {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !isHidden(e.Name()) {
+			return true
+		}
+	}
+	return false
 }
 
 // isShortcutFolder checks if a full folder path is a shortcut.
@@ -718,6 +819,7 @@ type AppSettings struct {
 	CopyArtwork  bool `json:"copy_artwork"`
 	UseGlobalBg  bool `json:"use_global_bg"`
 	ForceBlackBg bool `json:"force_black_bg"`
+	ShowHidden   bool `json:"show_hidden"`
 }
 
 // getSettingsPath returns the path to the settings JSON file.
@@ -736,7 +838,7 @@ func getSettingsPath() string {
 
 // loadSettings reads settings from disk. Returns defaults on any error (missing file, parse error).
 func loadSettings() AppSettings {
-	defaults := AppSettings{CopyArtwork: false, UseGlobalBg: true, ForceBlackBg: false}
+	defaults := AppSettings{CopyArtwork: false, UseGlobalBg: true, ForceBlackBg: false, ShowHidden: false}
 	data, err := os.ReadFile(getSettingsPath())
 	if err != nil {
 		return defaults

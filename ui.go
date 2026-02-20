@@ -75,9 +75,9 @@ func showMainMenu() mainAction {
 // pickPosition presents a list for choosing where the shortcut will sort in the menu.
 func pickPosition() (ShortcutPosition, bool) {
 	items := []gaba.MenuItem{
-		{Text: "Bottom  (after Z)"},
-		{Text: "Top     (before A)"},
 		{Text: "Alphabetical"},
+		{Text: "Top         (before A)"},
+		{Text: "Bottom  (after Z)"},
 	}
 	opts := gaba.DefaultListOptions("Shortcut Position", items)
 	opts.FooterHelpItems = []gaba.FooterHelpItem{
@@ -96,9 +96,9 @@ func pickPosition() (ShortcutPosition, bool) {
 	case 1:
 		return ShortcutPositionTop, true
 	case 2:
-		return ShortcutPositionAlpha, true
-	default:
 		return ShortcutPositionBottom, true
+	default:
+		return ShortcutPositionAlpha, true
 	}
 }
 
@@ -185,7 +185,8 @@ func addROMShortcutFlow() {
 }
 
 func pickConsole() (ConsoleDir, bool) {
-	consoles, err := scanConsoleDirs()
+	settings := loadSettings()
+	consoles, err := scanConsoleDirs(settings.ShowHidden)
 	if err != nil {
 		logError("scanning consoles", err)
 		showError("Could not read ROM folders.")
@@ -198,7 +199,11 @@ func pickConsole() (ConsoleDir, bool) {
 
 	items := make([]gaba.MenuItem, len(consoles))
 	for i, c := range consoles {
-		items[i] = gaba.MenuItem{Text: c.Display}
+		text := c.Display
+		if c.IsDisabled {
+			text += "  [disabled]"
+		}
+		items[i] = gaba.MenuItem{Text: text}
 	}
 
 	opts := gaba.DefaultListOptions("Select Console", items)
@@ -220,7 +225,8 @@ func pickConsole() (ConsoleDir, bool) {
 }
 
 func pickROM(console ConsoleDir) (ROMFile, bool) {
-	roms, err := scanROMs(console.Path)
+	settings := loadSettings()
+	roms, err := scanROMs(console.Path, settings.ShowHidden)
 	if err != nil {
 		logError("scanning ROMs", err)
 		showError("Could not read ROMs.")
@@ -239,6 +245,9 @@ func pickROM(console ConsoleDir) (ROMFile, bool) {
 			text += "  [Multi]"
 		case r.IsCueFolder:
 			text += "  [CUE]"
+		}
+		if r.IsDisabled {
+			text += "  [disabled]"
 		}
 		items[i] = gaba.MenuItem{Text: text}
 	}
@@ -330,7 +339,8 @@ func addToolShortcutFlow() {
 }
 
 func pickTool() (ToolPak, bool) {
-	tools, err := scanTools()
+	settings := loadSettings()
+	tools, err := scanTools(settings.ShowHidden)
 	if err != nil {
 		logError("scanning tools", err)
 		showError("Could not read Tools folder.")
@@ -520,6 +530,11 @@ func showSettingsScreen() {
 		initialForceBlack = 1
 	}
 
+	initialShowHidden := 0
+	if settings.ShowHidden {
+		initialShowHidden = 1
+	}
+
 	items := []gaba.ItemWithOptions{
 		{
 			Item: gaba.MenuItem{Text: "Copy artwork when available"},
@@ -545,6 +560,14 @@ func showSettingsScreen() {
 			},
 			SelectedOption: initialForceBlack,
 		},
+		{
+			Item: gaba.MenuItem{Text: "Show hidden/disabled"},
+			Options: []gaba.Option{
+				{DisplayName: "Off", Value: false},
+				{DisplayName: "On", Value: true},
+			},
+			SelectedOption: initialShowHidden,
+		},
 	}
 
 	listOpts := gaba.OptionListSettings{
@@ -569,7 +592,8 @@ func showSettingsScreen() {
 		settings.CopyArtwork, _ = result.Items[0].Options[result.Items[0].SelectedOption].Value.(bool)
 		settings.UseGlobalBg, _ = result.Items[1].Options[result.Items[1].SelectedOption].Value.(bool)
 		settings.ForceBlackBg, _ = result.Items[2].Options[result.Items[2].SelectedOption].Value.(bool)
-		log.Printf("ui: settings saving: copyArtwork=%v useGlobalBg=%v forceBlackBg=%v", settings.CopyArtwork, settings.UseGlobalBg, settings.ForceBlackBg)
+		settings.ShowHidden, _ = result.Items[3].Options[result.Items[3].SelectedOption].Value.(bool)
+		log.Printf("ui: settings saving: copyArtwork=%v useGlobalBg=%v forceBlackBg=%v showHidden=%v", settings.CopyArtwork, settings.UseGlobalBg, settings.ForceBlackBg, settings.ShowHidden)
 		logError("saving settings", saveSettings(settings))
 	}
 }
