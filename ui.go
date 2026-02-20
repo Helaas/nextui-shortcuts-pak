@@ -75,7 +75,7 @@ func showMainMenu() mainAction {
 // pickPosition presents a list for choosing where the shortcut will sort in the menu.
 func pickPosition() (ShortcutPosition, bool) {
 	items := []gaba.MenuItem{
-		{Text: "Bottom  (after Z)  ★"},
+		{Text: "Bottom  (after Z)"},
 		{Text: "Top     (before A)"},
 		{Text: "Alphabetical"},
 	}
@@ -510,6 +510,16 @@ func showSettingsScreen() {
 		initialArtwork = 1
 	}
 
+	initialBg := 1 // default: use device bg.png
+	if !settings.UseGlobalBg {
+		initialBg = 0
+	}
+
+	initialForceBlack := 0
+	if settings.ForceBlackBg {
+		initialForceBlack = 1
+	}
+
 	items := []gaba.ItemWithOptions{
 		{
 			Item: gaba.MenuItem{Text: "Copy artwork when available"},
@@ -518,6 +528,22 @@ func showSettingsScreen() {
 				{DisplayName: "On", Value: true},
 			},
 			SelectedOption: initialArtwork,
+		},
+		{
+			Item: gaba.MenuItem{Text: "Artwork background"},
+			Options: []gaba.Option{
+				{DisplayName: "Black", Value: false},
+				{DisplayName: "Device bg.png", Value: true},
+			},
+			SelectedOption: initialBg,
+		},
+		{
+			Item: gaba.MenuItem{Text: "Force black bg if no artwork"},
+			Options: []gaba.Option{
+				{DisplayName: "Off", Value: false},
+				{DisplayName: "On", Value: true},
+			},
+			SelectedOption: initialForceBlack,
 		},
 	}
 
@@ -540,9 +566,10 @@ func showSettingsScreen() {
 	}
 
 	if result != nil {
-		val, _ := result.Items[0].Options[result.Items[0].SelectedOption].Value.(bool)
-		settings.CopyArtwork = val
-		log.Printf("ui: settings saving: copyArtwork=%v", val)
+		settings.CopyArtwork, _ = result.Items[0].Options[result.Items[0].SelectedOption].Value.(bool)
+		settings.UseGlobalBg, _ = result.Items[1].Options[result.Items[1].SelectedOption].Value.(bool)
+		settings.ForceBlackBg, _ = result.Items[2].Options[result.Items[2].SelectedOption].Value.(bool)
+		log.Printf("ui: settings saving: copyArtwork=%v useGlobalBg=%v forceBlackBg=%v", settings.CopyArtwork, settings.UseGlobalBg, settings.ForceBlackBg)
 		logError("saving settings", saveSettings(settings))
 	}
 }
@@ -587,10 +614,11 @@ func regenerateAllMediaFlow() {
 		return
 	}
 
+	settings := loadSettings()
 	gaba.ProcessMessage("Regenerating media...",
 		gaba.ProcessMessageOptions{ShowThemeBackground: true},
 		func() (any, error) {
-			return nil, regenerateAllMedia()
+			return nil, regenerateAllMedia(settings)
 		},
 	)
 

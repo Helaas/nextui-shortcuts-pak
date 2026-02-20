@@ -22,6 +22,11 @@ const (
 
 var platform Platform
 
+// isBrick is true when running on the TrimUI Brick (1024×768).
+// NextUI's launch.sh exports DEVICE="brick" for the Brick and DEVICE="smartpro" for the
+// Smart Pro; both share PLATFORM="tg5040" and the same filesystem layout.
+var isBrick bool
+
 func main() {
 	platform = PlatformTG5040
 	platformEnv := strings.ToUpper(os.Getenv("PLATFORM"))
@@ -31,11 +36,15 @@ func main() {
 		platform = PlatformTG5040
 	}
 
+	// DEVICE is set by NextUI's launch.sh to "brick" or "smartpro" for tg5040 devices.
+	// Both share the same PLATFORM="tg5040" filesystem layout; only screen dimensions differ.
+	isBrick = strings.EqualFold(os.Getenv("DEVICE"), "brick")
+
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.SetPrefix("shortcuts: ")
 
 	logPath := getLogPath()
-	log.Printf("startup: platform=%s logPath=%s", platform, logPath)
+	log.Printf("startup: platform=%s device=%s isBrick=%v logPath=%s", platform, os.Getenv("DEVICE"), isBrick, logPath)
 	gaba.Init(gaba.Options{
 		WindowTitle:    "Shortcuts",
 		ShowBackground: true,

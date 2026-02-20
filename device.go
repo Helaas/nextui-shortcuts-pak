@@ -24,8 +24,16 @@ const (
 	systemPaksPath = sdcardPath + "/.system"
 )
 
-// shortcutPrefix is the Unicode star character used to mark shortcuts.
-const shortcutPrefix = "\u2605"
+// shortcutPrefix is the Zero Width No-Break Space (U+FEFF) prepended to Bottom-position
+// shortcut folder names so they sort after Z in NextUI without showing any visible prefix
+// in the menu. NextUI sorts via strcasecmp; U+FEFF's first UTF-8 byte (0xEF = 239) > 'z'
+// (122), so it always lands after the last letter. Verified truly invisible on TrimUI
+// hardware — U+200B and U+2060 both showed a faint advance with the NextUI/SDL_ttf font.
+const shortcutPrefix = "\uFEFF"
+
+// legacyShortcutPrefix is the old ★-based prefix (U+2605 + space) used before this change.
+// Retained for backward-compatible detection and display-name stripping of existing folders.
+const legacyShortcutPrefix = "\u2605 "
 
 // bridgeEmuTag is the tag used for tool shortcuts.
 const bridgeEmuTag = "SHORTCUT"
@@ -34,10 +42,11 @@ const bridgeEmuTag = "SHORTCUT"
 type ShortcutPosition int
 
 const (
-	// ShortcutPositionBottom places shortcuts after Z (uses ★ prefix, current default).
+	// ShortcutPositionBottom places shortcuts after Z (uses invisible U+200B prefix; default).
+	// NextUI renders the name without any visible prefix character.
 	ShortcutPositionBottom ShortcutPosition = iota
 	// ShortcutPositionTop places shortcuts before A (uses "0) " prefix;
-	// NextUI's trimSortingMeta strips "0) " so the game name displays cleanly).
+	// NextUI's trimSortingMeta strips "{digits}) " so the name displays cleanly).
 	ShortcutPositionTop
 	// ShortcutPositionAlpha sorts shortcuts alphabetically with everything else (no prefix).
 	ShortcutPositionAlpha
@@ -48,7 +57,7 @@ const (
 const topPrefix = "0) "
 
 // shortcutMarkerFile is the hidden file written inside every new shortcut folder.
-// Its presence identifies shortcuts that have no ★ prefix (Top/Alpha positions),
+// Its presence identifies shortcuts that have no ZWS/★ prefix (Top/Alpha positions),
 // and its content is the clean display name (e.g. "Battletoads (World)").
 const shortcutMarkerFile = ".shortcut"
 
@@ -80,9 +89,9 @@ type ToolPak struct {
 
 // Shortcut represents an existing shortcut on the device.
 type Shortcut struct {
-	Name       string // folder name, e.g. "★ Battletoads (MD)"
+	Name       string // folder name, e.g. "\u200BBattletoads (MD)" or "0) Battletoads (MD)"
 	Tag        string // e.g. "MD" or "SHORTCUT"
-	Display    string // e.g. "★ Battletoads"
+	Display    string // clean display name, e.g. "Battletoads"
 	Path       string // full path to shortcut folder
 	IsTool     bool   // true if this is a tool shortcut
 	TargetPath string // resolved target (ROM file path or tool .pak path)
@@ -243,8 +252,9 @@ func scanShortcuts() ([]Shortcut, error) {
 		display := readShortcutMarker(fullPath)
 		if display == "" {
 			display = extractDisplayName(name)
-			// Strip ★ prefix from legacy shortcuts for a clean display name.
-			display = strings.TrimPrefix(display, shortcutPrefix+" ")
+			// Strip ZWS or legacy ★ prefix so the display name is clean.
+			display = strings.TrimPrefix(display, shortcutPrefix)
+			display = strings.TrimPrefix(display, legacyShortcutPrefix)
 		}
 
 		sc := Shortcut{
@@ -318,7 +328,7 @@ func createROMShortcut(displayName, tag, consoleDirName string, rom ROMFile, pos
 
 	if settings.CopyArtwork {
 		artworkSrc := filepath.Join(romsDir, consoleDirName, ".media", displayName+".png")
-		generateArtworkBg(artworkSrc, folderPath)
+		generateArtworkBg(artworkSrc, folderPath, settings.UseGlobalBg, settings.ForceBlackBg)
 	}
 
 	log.Printf("createROMShortcut: created folder=%s", folderPath)
@@ -354,7 +364,7 @@ func createToolShortcut(displayName, pakPath string, pos ShortcutPosition, setti
 
 	if settings.CopyArtwork {
 		artworkSrc := filepath.Join(toolsDir, ".media", displayName+".png")
-		generateArtworkBg(artworkSrc, folderPath)
+		generateArtworkBg(artworkSrc, folderPath, settings.UseGlobalBg, settings.ForceBlackBg)
 	}
 
 	log.Printf("createToolShortcut: created folder=%s", folderPath)
@@ -409,10 +419,11 @@ func isHidden(name string) bool {
 }
 
 // isShortcutFolder checks if a full folder path is a shortcut.
-// Detects: ★-prefixed folders (legacy + Bottom position) and folders with a .shortcut marker file (Top/Alpha).
+// Detects: ZWS-prefixed folders (Bottom), legacy ★-prefixed folders, and folders
+// with a .shortcut marker file (Top/Alpha positions).
 func isShortcutFolder(folderPath string) bool {
 	name := filepath.Base(folderPath)
-	if strings.HasPrefix(name, shortcutPrefix) {
+	if strings.HasPrefix(name, shortcutPrefix) || strings.HasPrefix(name, legacyShortcutPrefix) {
 		return true
 	}
 	_, err := os.Stat(filepath.Join(folderPath, shortcutMarkerFile))
@@ -420,7 +431,7 @@ func isShortcutFolder(folderPath string) bool {
 }
 
 // extractTag extracts the emulator tag from a directory name.
-// e.g. "Game Boy Advance (GBA)" -> "GBA", "★ Battletoads (MD)" -> "MD"
+// e.g. "Game Boy Advance (GBA)" -> "GBA", "\u200BBattletoads (MD)" -> "MD"
 func extractTag(name string) string {
 	idx := strings.LastIndex(name, "(")
 	if idx < 0 {
@@ -434,7 +445,7 @@ func extractTag(name string) string {
 }
 
 // extractDisplayName extracts the display name, stripping the trailing (TAG).
-// e.g. "★ Battletoads (MD)" -> "★ Battletoads"
+// e.g. "\u200BBattletoads (MD)" -> "\u200BBattletoads"
 func extractDisplayName(name string) string {
 	idx := strings.LastIndex(name, "(")
 	if idx < 0 {
@@ -454,7 +465,7 @@ func stripExtension(name string) string {
 
 // buildFolderName constructs the shortcut folder name for the given position.
 //
-//	Bottom: "★ Battletoads (World) (MD)"
+//	Bottom: "\u200BBattletoads (World) (MD)"  (invisible ZWS prefix, sorts after Z)
 //	Top:    "0) Battletoads (World) (MD)"
 //	Alpha:  "Battletoads (World) (MD)"
 func buildFolderName(pos ShortcutPosition, displayName, tag string) string {
@@ -464,24 +475,28 @@ func buildFolderName(pos ShortcutPosition, displayName, tag string) string {
 		return topPrefix + base
 	case ShortcutPositionAlpha:
 		return base
-	default: // ShortcutPositionBottom
-		return fmt.Sprintf("%s %s", shortcutPrefix, base)
+	default: // ShortcutPositionBottom — ZWS needs no space separator
+		return shortcutPrefix + base
 	}
 }
 
 // generateArtworkBg composites a fullscreen bg.png for a shortcut's .media/ folder.
-// It renders the device's global /mnt/SDCARD/bg.png as the base, then overlays artSrcPath
-// scaled to match NextUI's thumbnail dimensions (screen_w*0.45 × screen_h*0.60, right-aligned,
-// vertically centred at 50% screen height — identical to SCREEN_GAMELIST thumbnail rendering).
-// Does nothing if artSrcPath does not exist.
-func generateArtworkBg(artSrcPath, destFolder string) {
-	if _, err := os.Stat(artSrcPath); err != nil {
-		return // no art — skip silently
-	}
-	artImg, err := loadPNGImage(artSrcPath)
-	if err != nil {
-		log.Printf("generateArtworkBg: load art: %v", err)
-		return
+// When useGlobalBg is true the device's global /mnt/SDCARD/bg.png is used as the base layer;
+// otherwise the canvas is plain black. The art is then overlaid right-aligned at the NextUI
+// SCREEN_GAMELIST thumbnail dimensions (screen_w*0.45 × screen_h*0.60).
+// When forceBlack is true a bg.png is written even when artSrcPath does not exist (base layer
+// only, no art overlay). When forceBlack is false and artSrcPath is missing, nothing is written.
+func generateArtworkBg(artSrcPath, destFolder string, useGlobalBg, forceBlack bool) {
+	var artImg image.Image
+	if _, err := os.Stat(artSrcPath); err == nil {
+		img, err := loadPNGImage(artSrcPath)
+		if err != nil {
+			log.Printf("generateArtworkBg: load art: %v", err)
+			return
+		}
+		artImg = img
+	} else if !forceBlack {
+		return // no art and not forcing — skip silently
 	}
 
 	screenW, screenH := screenDimensions()
@@ -494,44 +509,50 @@ func generateArtworkBg(artSrcPath, destFolder string) {
 	}
 
 	// Layer 1: global bg.png scaled to cover the canvas (centre-crop, no letterbox).
-	bgPath := globalBgPath()
-	if bgImg, err := loadPNGImage(bgPath); err == nil {
-		srcW, srcH := bgImg.Bounds().Dx(), bgImg.Bounds().Dy()
-		scaleX := float64(screenW) / float64(srcW)
-		scaleY := float64(screenH) / float64(srcH)
-		scale := scaleX
-		if scaleY > scaleX {
-			scale = scaleY
+	// Skipped when useGlobalBg is false — canvas stays plain black.
+	if useGlobalBg {
+		bgPath := globalBgPath()
+		if bgImg, err := loadPNGImage(bgPath); err == nil {
+			srcW, srcH := bgImg.Bounds().Dx(), bgImg.Bounds().Dy()
+			scaleX := float64(screenW) / float64(srcW)
+			scaleY := float64(screenH) / float64(srcH)
+			scale := scaleX
+			if scaleY > scaleX {
+				scale = scaleY
+			}
+			newW := int(float64(srcW) * scale)
+			newH := int(float64(srcH) * scale)
+			scaledBg := image.NewNRGBA(image.Rect(0, 0, newW, newH))
+			xdraw.BiLinear.Scale(scaledBg, scaledBg.Bounds(), bgImg, bgImg.Bounds(), xdraw.Src, nil)
+			// Centre-crop: offset into scaledBg so the canvas window is centred.
+			offX := (newW - screenW) / 2
+			offY := (newH - screenH) / 2
+			xdraw.Draw(canvas, canvas.Bounds(), scaledBg, image.Point{offX, offY}, xdraw.Src)
 		}
-		newW := int(float64(srcW) * scale)
-		newH := int(float64(srcH) * scale)
-		scaledBg := image.NewNRGBA(image.Rect(0, 0, newW, newH))
-		xdraw.BiLinear.Scale(scaledBg, scaledBg.Bounds(), bgImg, bgImg.Bounds(), xdraw.Src, nil)
-		// Centre-crop: offset into scaledBg so the canvas window is centred.
-		offX := (newW - screenW) / 2
-		offY := (newH - screenH) / 2
-		xdraw.Draw(canvas, canvas.Bounds(), scaledBg, image.Point{offX, offY}, xdraw.Src)
 	}
 
-	// Layer 2: game/tool art, right-aligned and vertically centred.
-	//   max_w = screen_w * 0.55  (keep art within right ~55% so left-side menu text is clear)
-	//   max_h = screen_h * 0.70  (taller than the game-list thumbnail so portrait art is wider)
-	//   target_x = screen_w - new_w - right_margin (clamped ≥ 0)
+	// Layer 2: game/tool art — mirrors nextui.c SCREEN_GAMELIST thumbnail rendering:
+	//   max_w = screen_w * CFG_DEFAULT_GAMEARTWIDTH (0.45)
+	//   max_h = screen_h * 0.60
+	//   target_x = screen_w - new_w - SCALE1(BUTTON_MARGIN*3)  [30 px at FIXED_SCALE=2]
 	//   center_y = screen_h*0.50 - new_h/2
-	maxW := int(float64(screenW) * 0.55)
-	maxH := int(float64(screenH) * 0.70)
-	artW, artH := thumbnailFit(artImg.Bounds().Dx(), artImg.Bounds().Dy(), maxW, maxH)
-	scaledArt := image.NewNRGBA(image.Rect(0, 0, artW, artH))
-	xdraw.BiLinear.Scale(scaledArt, scaledArt.Bounds(), artImg, artImg.Bounds(), xdraw.Over, nil)
-	// Rounded corners: effective radius = FIXED_SCALE(2) * CFG_DEFAULT_THUMBRADIUS(20) = 40 px.
-	// Mirrors GFX_ApplyRoundedCorners_8888 in nextui: pixels where dx²+dy²>r² become transparent.
-	applyRoundedCorners(scaledArt, 40)
+	// Skipped when artImg is nil (forceBlack mode with no source art).
+	if artImg != nil {
+		maxW := int(float64(screenW) * 0.45)
+		maxH := int(float64(screenH) * 0.60)
+		artW, artH := thumbnailFit(artImg.Bounds().Dx(), artImg.Bounds().Dy(), maxW, maxH)
+		scaledArt := image.NewNRGBA(image.Rect(0, 0, artW, artH))
+		xdraw.BiLinear.Scale(scaledArt, scaledArt.Bounds(), artImg, artImg.Bounds(), xdraw.Over, nil)
+		// Rounded corners: effective radius = FIXED_SCALE(2) * CFG_DEFAULT_THUMBRADIUS(20) = 40 px.
+		// Mirrors GFX_ApplyRoundedCorners_8888 in nextui: pixels where dx²+dy²>r² become transparent.
+		applyRoundedCorners(scaledArt, 40)
 
-	const rightMargin = 30 // SCALE1(BUTTON_MARGIN * 3) at FIXED_SCALE=2
-	targetX := max(0, screenW-artW-rightMargin)
-	centerY := screenH/2 - artH/2
-	artDst := image.Rect(targetX, centerY, targetX+artW, centerY+artH)
-	xdraw.Draw(canvas, artDst, scaledArt, image.Point{}, xdraw.Over)
+		const rightMargin = 30 // SCALE1(BUTTON_MARGIN * 3) at FIXED_SCALE=2
+		targetX := max(0, screenW-artW-rightMargin)
+		centerY := screenH/2 - artH/2
+		artDst := image.Rect(targetX, centerY, targetX+artW, centerY+artH)
+		xdraw.Draw(canvas, artDst, scaledArt, image.Point{}, xdraw.Over)
+	}
 
 	// Save composite.
 	mediaDir := filepath.Join(destFolder, ".media")
@@ -548,13 +569,19 @@ func generateArtworkBg(artSrcPath, destFolder string) {
 	if err := png.Encode(f, canvas); err != nil {
 		log.Printf("generateArtworkBg: encode: %v", err)
 	}
-	log.Printf("generateArtworkBg: %s/.media/bg.png (%dx%d art=%dx%d)", destFolder, screenW, screenH, artW, artH)
+	log.Printf("generateArtworkBg: %s/.media/bg.png (%dx%d)", destFolder, screenW, screenH)
 }
 
 // screenDimensions returns the native screen size for the current platform.
-// TG5040 Smart Pro and TG5050 are both 1280×720. The TG5040 Brick is 1024×768 but
-// cannot be detected at runtime; NextUI scales bg.png with aspect-ratio preservation.
+// isBrick is set from DEVICE="brick" (exported by NextUI's launch.sh).
+//
+//	Smart Pro (DEVICE=smartpro) → 1280×720
+//	Smart Pro S (tg5050)        → 1280×720
+//	Brick       (DEVICE=brick)  → 1024×768
 func screenDimensions() (int, int) {
+	if isBrick {
+		return 1024, 768
+	}
 	return 1280, 720
 }
 
@@ -651,15 +678,15 @@ func shortcutArtSrcPath(sc Shortcut) string {
 
 // regenerateAllMedia regenerates bg.png for every existing shortcut that has
 // source artwork available, creating .media/ if needed.
-func regenerateAllMedia() error {
+func regenerateAllMedia(settings AppSettings) error {
 	shortcuts, err := scanShortcuts()
 	if err != nil {
 		return fmt.Errorf("scanning shortcuts: %w", err)
 	}
 	for _, sc := range shortcuts {
 		artSrc := shortcutArtSrcPath(sc)
-		if artSrc != "" {
-			generateArtworkBg(artSrc, sc.Path)
+		if artSrc != "" || settings.ForceBlackBg {
+			generateArtworkBg(artSrc, sc.Path, settings.UseGlobalBg, settings.ForceBlackBg)
 		}
 	}
 	log.Printf("regenerateAllMedia: processed %d shortcuts", len(shortcuts))
@@ -688,7 +715,9 @@ func removeAllMedia() error {
 
 // AppSettings holds persistent user preferences.
 type AppSettings struct {
-	CopyArtwork bool `json:"copy_artwork"`
+	CopyArtwork  bool `json:"copy_artwork"`
+	UseGlobalBg  bool `json:"use_global_bg"`
+	ForceBlackBg bool `json:"force_black_bg"`
 }
 
 // getSettingsPath returns the path to the settings JSON file.
@@ -702,12 +731,12 @@ func getSettingsPath() string {
 			sdcard = "/mnt/SDCARD"
 		}
 	}
-	return filepath.Join(sdcard, ".userdata", string(platform), "shortcuts_settings.json")
+	return filepath.Join(sdcard, ".userdata", "shared", "Shortcuts", "settings.json")
 }
 
 // loadSettings reads settings from disk. Returns defaults on any error (missing file, parse error).
 func loadSettings() AppSettings {
-	defaults := AppSettings{CopyArtwork: false}
+	defaults := AppSettings{CopyArtwork: false, UseGlobalBg: true, ForceBlackBg: false}
 	data, err := os.ReadFile(getSettingsPath())
 	if err != nil {
 		return defaults

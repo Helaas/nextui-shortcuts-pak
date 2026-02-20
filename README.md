@@ -4,10 +4,13 @@ Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050
 
 ## Supported Platforms
 
-| Platform | Device | Build |
-|----------|--------|-------|
-| `tg5040` | TrimUI Brick, TrimUI Smart Pro | Docker (ARM64) |
-| `tg5050` | TrimUI Smart Pro S | Docker (ARM64) |
+| Platform | Device | Screen | Build |
+|----------|--------|--------|-------|
+| `tg5040` (TG5040) | TrimUI Smart Pro | 1280×720 | Docker (ARM64) |
+| `tg5040` (TG3040) | TrimUI Brick | 1024×768 | Docker (ARM64) |
+| `tg5050` | TrimUI Smart Pro S | 1280×720 | Docker (ARM64) |
+
+> The Brick and Smart Pro share the same `tg5040` filesystem layout (tools, roms, settings paths are identical). The pak auto-detects the Brick via the `DEVICE` environment variable (`"brick"` vs `"smartpro"`), which NextUI's `launch.sh` exports at startup, and generates correctly sized `bg.png` images at 1024×768.
 
 ## What It Does
 
@@ -74,16 +77,16 @@ When creating a shortcut you choose where it sorts in the NextUI main menu:
 
 | Position | Folder prefix | Effect |
 |----------|--------------|--------|
-| **Bottom** (default) | `★ ` | Appears after Z |
-| **Top** | `0) ` | Appears before A (NextUI strips the `0) ` from the display name) |
+| **Bottom** (default) | U+200B (invisible) | Appears after Z; NextUI displays the name with no visible prefix |
+| **Top** | `0) ` | Appears before A; NextUI's `trimSortingMeta` strips `0) ` at render time |
 | **Alphabetical** | _(none)_ | Sorts with everything else by name |
 
 ## How Shortcuts Work
 
 ROM shortcut structure:
 ```
-/mnt/SDCARD/Roms/★ Name (TAG)/
-  ★ Name (TAG).m3u        ← relative path to the real ROM
+/mnt/SDCARD/Roms/<ZWS>Name (TAG)/
+  <ZWS>Name (TAG).m3u     ← relative path to the real ROM  (<ZWS> = U+200B, invisible)
   .shortcut               ← clean display name (used by Shortcuts pak)
   .media/
     bg.png                ← generated fullscreen background (optional)
@@ -99,20 +102,20 @@ ROM shortcut structure:
 
 Tool shortcut structure:
 ```
-/mnt/SDCARD/Roms/★ Name (SHORTCUT)/
-  ★ Name (SHORTCUT).m3u  ← contains "target"
-  target                  ← full path to the tool .pak directory
-  .shortcut               ← clean display name
+/mnt/SDCARD/Roms/<ZWS>Name (SHORTCUT)/
+  <ZWS>Name (SHORTCUT).m3u  ← contains "target"  (<ZWS> = U+200B, invisible)
+  target                     ← full path to the tool .pak directory
+  .shortcut                  ← clean display name
   .media/
-    bg.png                ← generated fullscreen background (optional)
+    bg.png                   ← generated fullscreen background (optional)
 ```
 
 ## Artwork / bg.png Generation
 
-When artwork copying is enabled (or via **Manage Media → Regenerate all media**), the pak generates a 1280×720 `bg.png` for each shortcut:
+When artwork copying is enabled (or via **Manage Media → Regenerate all media**), the pak generates a native-resolution `bg.png` for each shortcut (1280×720 on Smart Pro / TG5050, 1024×768 on Brick):
 
 1. **Base layer** — the device's global `/mnt/SDCARD/bg.png` scaled to cover the canvas (centre-cropped)
-2. **Art layer** — the game/tool artwork scaled to fit within `55% × screen width` and `70% × screen height`, preserving aspect ratio, right-aligned and vertically centred, with rounded corners
+2. **Art layer** — the game/tool artwork scaled to fit `45% × screen width` × `60% × screen height` (matching NextUI's game-list thumbnail dimensions), preserving aspect ratio, right-aligned and vertically centred, with rounded corners
 
 Source artwork is looked up at:
 - ROM shortcuts: `Roms/<Console Dir>/.media/<display name>.png`
