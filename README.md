@@ -94,6 +94,52 @@ When **Off** (default), the ROM and console pickers hide:
 
 Turn this **On** to make those entries visible and selectable. Mac system folders (`.DS_Store`, `.Spotlight-V100`, etc.) are always hidden regardless of this setting.
 
+## Five Game Handheld Mode
+
+Inspired by [Retro Game Corps' guide for MiniUI](https://retrogamecorps.com/2025/10/24/minui-starter-guide/#Five), this mode gives you a clean, intentional main menu with only the games you've hand-picked — no scrolling through hundreds of titles.
+
+### How it works
+
+Instead of browsing a full ROM library, you:
+1. Hide your ROM console folders from NextUI by appending `.disabled` to their names
+2. Tell the Shortcuts pak to show those hidden folders anyway
+3. Create a shortcut for each game you want on your main menu
+
+### Setup
+
+**Step 1 — Disable your ROM browser folders**
+
+On your SD card, rename each console folder in `Roms/` by appending `.disabled`:
+
+```
+Roms/
+  Game Boy Advance (GBA)/        →   Game Boy Advance (GBA).disabled/
+  Super Nintendo (SNES)/         →   Super Nintendo (SNES).disabled/
+  ...
+```
+
+These folders will no longer appear in NextUI's Roms section. Your ROM files stay exactly where they are — nothing is deleted.
+
+**Step 2 — Enable "Show hidden/disabled" in Shortcuts Settings**
+
+Open **Shortcuts → Settings** and set **Show hidden/disabled/empty ROMs** to **On**.
+
+**Step 3 — Create your shortcuts**
+
+Use **Add ROM Shortcut** to pick each game you want on your main menu. The `.disabled` console folders will now appear in the console picker. Choose a sort position and the ROM is added to the main menu.
+
+### Swapping or adding games
+
+1. Open **Shortcuts → Settings**, make sure **Show hidden/disabled/empty ROMs** is set to **On**
+2. Use **Add ROM Shortcut** to add a new game, or **Manage Shortcuts** to delete an old one
+3. Optional: Turn **Show hidden/disabled/empty ROMs** back to **Off**
+
+### Tips
+
+- Set **Artwork mode** to **Art on Main menu Wallpaper** or **Art on Black background** so each shortcut gets a fullscreen backdrop — it makes the curated menu feel polished.
+- Use the **Alphabetical** sort position if you want shortcuts to sit naturally among other top-level folders, or **Bottom** to keep them grouped at the end of the menu.
+- You can access your full ROM library at any time by removing `.disabled` from the console folders.
+
 ## Shortcut Position
 
 When creating a shortcut you choose where it sorts in the NextUI main menu:
