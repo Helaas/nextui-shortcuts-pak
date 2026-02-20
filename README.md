@@ -96,7 +96,7 @@ Turn this **On** to make those entries visible and selectable. Mac system folder
 
 ## Five Game Handheld Mode
 
-Inspired by [Retro Game Corps' guide for MiniUI](https://retrogamecorps.com/2025/10/24/minui-starter-guide/#Five), this mode gives you a clean, intentional main menu with only the games you've hand-picked — no scrolling through hundreds of titles.
+Inspired by [Retro Game Corps' guide for MinUI](https://retrogamecorps.com/2025/10/24/minui-starter-guide/#Five), this mode gives you a clean, intentional main menu with only the games you've hand-picked — no scrolling through hundreds of titles.
 
 ### How it works
 
