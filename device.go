@@ -234,6 +234,12 @@ func scanROMs(consoleDir string, showHidden bool) ([]ROMFile, error) {
 					IsCueFolder: true,
 					IsDisabled:  isDisabled,
 				})
+			} else {
+				// Plain subfolder — recurse into it.
+				sub, err := scanROMs(dirPath, showHidden)
+				if err == nil {
+					roms = append(roms, sub...)
+				}
 			}
 			continue
 		}
@@ -380,15 +386,18 @@ func createROMShortcut(displayName, tag, consoleDirName string, rom ROMFile, pos
 		return fmt.Errorf("creating shortcut dir: %w", err)
 	}
 
-	// The relative path from the shortcut folder to the target
+	// The relative path from the shortcut folder to the target.
+	// Shortcut folders always sit at the root of romsDir, so the path is
+	// always "../<relativePathFromRomsDir>" — this works for any nesting depth.
+	relFromRoms, _ := filepath.Rel(romsDir, rom.Path)
 	var relPath string
 	switch {
 	case rom.IsMultiDisc:
-		relPath = fmt.Sprintf("../%s/%s/%s.m3u", consoleDirName, rom.Name, rom.Name)
+		relPath = "../" + relFromRoms + "/" + rom.Name + ".m3u"
 	case rom.IsCueFolder:
-		relPath = fmt.Sprintf("../%s/%s/%s.cue", consoleDirName, rom.Name, rom.Name)
+		relPath = "../" + relFromRoms + "/" + rom.Name + ".cue"
 	default:
-		relPath = fmt.Sprintf("../%s/%s", consoleDirName, rom.Name)
+		relPath = "../" + relFromRoms
 	}
 
 	m3uPath := filepath.Join(folderPath, folderName+".m3u")
@@ -401,7 +410,7 @@ func createROMShortcut(displayName, tag, consoleDirName string, rom ROMFile, pos
 	}
 
 	if settings.CopyArtwork {
-		artworkSrc := filepath.Join(romsDir, consoleDirName, ".media", displayName+".png")
+		artworkSrc := filepath.Join(filepath.Dir(rom.Path), ".media", rom.Display+".png")
 		useGlobalBg, forceBlack := settings.artworkBgParams()
 		generateArtworkBg(artworkSrc, folderPath, useGlobalBg, forceBlack)
 	}

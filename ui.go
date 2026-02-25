@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 
 	gaba "github.com/BrandonKowalski/gabagool/v2/pkg/gabagool"
 	"github.com/BrandonKowalski/gabagool/v2/pkg/gabagool/constants"
@@ -240,6 +241,10 @@ func pickROM(console ConsoleDir) (ROMFile, bool) {
 	items := make([]gaba.MenuItem, len(roms))
 	for i, r := range roms {
 		text := r.Display
+		if romDir := filepath.Dir(r.Path); romDir != console.Path {
+			subDir, _ := filepath.Rel(console.Path, romDir)
+			text = subDir + " / " + text
+		}
 		switch {
 		case r.IsMultiDisc:
 			text += "  [Multi]"
