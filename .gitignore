@@ -7,6 +7,9 @@ vendor/
 # Docker/Go build cache
 .cache/
 
+# Mock SD
+mock_sdcard/
+
 # macOS
 .DS_Store
 
