@@ -29,6 +29,129 @@ bool ends_with(const char *str, const char *suffix)
     return strcmp(str + slen - xlen, suffix) == 0;
 }
 
+static void copy_cstr_trunc(char *out, size_t out_size, const char *src)
+{
+    size_t len = 0;
+
+    if (!out || out_size == 0) return;
+    if (src) len = strlen(src);
+    if (len >= out_size) len = out_size - 1;
+
+    if (len > 0 && src)
+        memcpy(out, src, len);
+    out[len] = '\0';
+}
+
+static bool copy_cstr_exact(char *out, size_t out_size, const char *src)
+{
+    size_t len = 0;
+
+    if (!out || out_size == 0) return false;
+    if (src) len = strlen(src);
+    if (len >= out_size) {
+        out[0] = '\0';
+        return false;
+    }
+
+    if (len > 0 && src)
+        memcpy(out, src, len);
+    out[len] = '\0';
+    return true;
+}
+
+static bool append_cstr_exact(char *out, size_t out_size, const char *suffix)
+{
+    size_t out_len;
+    size_t suffix_len = 0;
+
+    if (!out || out_size == 0) return false;
+    if (suffix) suffix_len = strlen(suffix);
+
+    out_len = strlen(out);
+    if (out_len + suffix_len >= out_size)
+        return false;
+
+    if (suffix_len > 0 && suffix)
+        memcpy(out + out_len, suffix, suffix_len);
+    out[out_len + suffix_len] = '\0';
+    return true;
+}
+
+static bool join_path(char *out, size_t out_size,
+                      const char *left, const char *right)
+{
+    size_t left_len;
+    size_t right_len;
+    size_t pos = 0;
+    bool add_sep;
+    bool trim_right_sep;
+
+    if (!out || out_size == 0) return false;
+    out[0] = '\0';
+
+    if (!left) left = "";
+    if (!right) right = "";
+
+    left_len = strlen(left);
+    right_len = strlen(right);
+    add_sep = (left_len > 0 && right_len > 0 &&
+               left[left_len - 1] != '/' && right[0] != '/');
+    trim_right_sep = (left_len > 0 && right_len > 0 &&
+                      left[left_len - 1] == '/' && right[0] == '/');
+
+    if (trim_right_sep) {
+        right++;
+        right_len--;
+    }
+
+    if (left_len + (add_sep ? 1 : 0) + right_len >= out_size)
+        return false;
+
+    if (left_len > 0) {
+        memcpy(out, left, left_len);
+        pos = left_len;
+    }
+    if (add_sep)
+        out[pos++] = '/';
+    if (right_len > 0) {
+        memcpy(out + pos, right, right_len);
+        pos += right_len;
+    }
+    out[pos] = '\0';
+    return true;
+}
+
+static bool join_path_with_suffix(char *out, size_t out_size,
+                                  const char *dir, const char *leaf,
+                                  const char *suffix)
+{
+    if (!join_path(out, out_size, dir, leaf))
+        return false;
+    return append_cstr_exact(out, out_size, suffix);
+}
+
+static void copy_with_suffix_trunc(char *out, size_t out_size,
+                                   const char *src, const char *suffix)
+{
+    size_t suffix_len = suffix ? strlen(suffix) : 0;
+    size_t src_len = src ? strlen(src) : 0;
+
+    if (!out || out_size == 0) return;
+    if (suffix_len >= out_size) {
+        out[0] = '\0';
+        return;
+    }
+
+    if (src_len > out_size - suffix_len - 1)
+        src_len = out_size - suffix_len - 1;
+
+    if (src_len > 0 && src)
+        memcpy(out, src, src_len);
+    if (suffix_len > 0 && suffix)
+        memcpy(out + src_len, suffix, suffix_len);
+    out[src_len + suffix_len] = '\0';
+}
+
 /* extract_tag: "Game Boy Advance (GBA)" -> "GBA" */
 void extract_tag(const char *name, char *out, int out_size)
 {
@@ -64,14 +187,14 @@ void extract_display_name(const char *name, char *out, int out_size)
         if (*p == '(') open = p;
     }
     if (!open) {
-        snprintf(out, out_size, "%s", name);
+        copy_cstr_trunc(out, (size_t)out_size, name);
         return;
     }
     int len = (int)(open - name);
     /* Trim trailing whitespace. */
     while (len > 0 && name[len - 1] == ' ') len--;
     if (len <= 0) {
-        snprintf(out, out_size, "%s", name);
+        copy_cstr_trunc(out, (size_t)out_size, name);
         return;
     }
     if (len >= out_size) len = out_size - 1;
@@ -93,7 +216,7 @@ void strip_extension(const char *name, char *out, int out_size)
             return;
         }
     }
-    snprintf(out, out_size, "%s", name);
+    copy_cstr_trunc(out, (size_t)out_size, name);
 }
 
 /* build_folder_name: construct prefixed shortcut folder name. */
@@ -140,7 +263,8 @@ bool is_shortcut_folder(const char *folder_path)
 
     /* Check for .shortcut marker file. */
     char marker[SC_MAX_PATH];
-    snprintf(marker, sizeof(marker), "%s/" SHORTCUT_MARKER, folder_path);
+    if (!join_path(marker, sizeof(marker), folder_path, SHORTCUT_MARKER))
+        return false;
     struct stat st;
     return stat(marker, &st) == 0;
 }
@@ -192,8 +316,9 @@ int write_text_file(const char *path, const char *content)
 
 int ensure_dir_exists(const char *path)
 {
-    char tmp[SC_MAX_PATH];
-    snprintf(tmp, sizeof(tmp), "%s", path);
+    char *tmp = path ? strdup(path) : NULL;
+    if (!tmp) return -1;
+
     for (char *p = tmp + 1; *p; p++) {
         if (*p == '/') {
             *p = '\0';
@@ -201,7 +326,9 @@ int ensure_dir_exists(const char *path)
             *p = '/';
         }
     }
-    return mkdir(tmp, 0755) == 0 || errno == EEXIST ? 0 : -1;
+    int rc = (mkdir(tmp, 0755) == 0 || errno == EEXIST) ? 0 : -1;
+    free(tmp);
+    return rc;
 }
 
 int rmdir_recursive(const char *path)
@@ -213,7 +340,10 @@ int rmdir_recursive(const char *path)
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
             continue;
         char child[SC_MAX_PATH];
-        snprintf(child, sizeof(child), "%s/%s", path, ent->d_name);
+        if (!join_path(child, sizeof(child), path, ent->d_name)) {
+            closedir(d);
+            return -1;
+        }
         struct stat st;
         if (stat(child, &st) == 0 && S_ISDIR(st.st_mode)) {
             rmdir_recursive(child);
@@ -399,7 +529,8 @@ void artwork_bg_params(const app_settings *s, bool *use_global_bg,
 static char *read_shortcut_marker(const char *folder_path)
 {
     char marker[SC_MAX_PATH * 2];
-    snprintf(marker, sizeof(marker), "%s/" SHORTCUT_MARKER, folder_path);
+    if (!join_path(marker, sizeof(marker), folder_path, SHORTCUT_MARKER))
+        return NULL;
     char *data = read_text_file(marker);
     if (!data) return NULL;
     /* Trim trailing whitespace. */
@@ -415,20 +546,26 @@ static int write_shortcut_marker(const char *folder_path,
                                  const char *display_name)
 {
     char marker[SC_MAX_PATH * 2];
-    snprintf(marker, sizeof(marker), "%s/" SHORTCUT_MARKER, folder_path);
+    if (!join_path(marker, sizeof(marker), folder_path, SHORTCUT_MARKER))
+        return -1;
     return write_text_file(marker, display_name);
 }
 
-static void normalize_path(const char *path, char *out, int out_size)
+static bool normalize_path(const char *path, char *out, int out_size)
 {
-    char tmp[SC_MAX_PATH];
+    char *tmp = NULL;
     char *parts[SC_MAX_PATH / 2];
     int count = 0;
     bool absolute;
 
-    if (!path || !out || out_size <= 0) return;
+    if (!path || !out || out_size <= 0) return false;
 
-    snprintf(tmp, sizeof(tmp), "%s", path);
+    tmp = strdup(path);
+    if (!tmp) {
+        out[0] = '\0';
+        return false;
+    }
+
     absolute = (tmp[0] == '/');
     out[0] = '\0';
 
@@ -451,18 +588,34 @@ static void normalize_path(const char *path, char *out, int out_size)
         parts[count++] = token;
     }
 
-    if (absolute)
-        snprintf(out, out_size, "/");
+    if (absolute && !copy_cstr_exact(out, (size_t)out_size, "/")) {
+        free(tmp);
+        return false;
+    }
 
     for (int i = 0; i < count; i++) {
         size_t len = strlen(out);
-        if (len > 0 && out[len - 1] != '/')
-            strncat(out, "/", out_size - strlen(out) - 1);
-        strncat(out, parts[i], out_size - strlen(out) - 1);
+        if (len > 0 && out[len - 1] != '/' &&
+            !append_cstr_exact(out, (size_t)out_size, "/")) {
+            out[0] = '\0';
+            free(tmp);
+            return false;
+        }
+        if (!append_cstr_exact(out, (size_t)out_size, parts[i])) {
+            out[0] = '\0';
+            free(tmp);
+            return false;
+        }
     }
 
-    if (out[0] == '\0')
-        snprintf(out, out_size, absolute ? "/" : ".");
+    if (out[0] == '\0' &&
+        !copy_cstr_exact(out, (size_t)out_size, absolute ? "/" : ".")) {
+        free(tmp);
+        return false;
+    }
+
+    free(tmp);
+    return true;
 }
 
 /* ── Scanning — comparison function ───────────────────────────── */
@@ -523,7 +676,8 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
 
         /* Must be a directory. */
         char full[SC_MAX_PATH * 2];
-        snprintf(full, sizeof(full), "%s/%s", roms_dir, ent->d_name);
+        if (!join_path(full, sizeof(full), roms_dir, ent->d_name))
+            continue;
         struct stat st;
         if (stat(full, &st) != 0 || !S_ISDIR(st.st_mode))
             continue;
@@ -543,7 +697,7 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
         /* Strip .disabled suffix for tag/display extraction. */
         bool disabled = ends_with(name, ".disabled");
         char base_name[SC_MAX_NAME];
-        snprintf(base_name, sizeof(base_name), "%s", name);
+        copy_cstr_trunc(base_name, sizeof(base_name), name);
         if (disabled) {
             base_name[strlen(base_name) - strlen(".disabled")] = '\0';
         }
@@ -555,13 +709,17 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
         arr = grow_array(arr, &cap, n, sizeof(console_dir));
         if (!arr) { closedir(d); *out = NULL; *count = 0; return -1; }
 
-        console_dir *c = &arr[n++];
+        console_dir *c = &arr[n];
         memset(c, 0, sizeof(*c));
-        snprintf(c->name, sizeof(c->name), "%s", name);
-        snprintf(c->tag, sizeof(c->tag), "%s", tag);
-        snprintf(c->path, sizeof(c->path), "%s", full);
+        copy_cstr_trunc(c->name, sizeof(c->name), name);
+        copy_cstr_trunc(c->tag, sizeof(c->tag), tag);
+        if (!copy_cstr_exact(c->path, sizeof(c->path), full)) {
+            ap_log("scan_console_dirs: skipping overlong path %s", full);
+            continue;
+        }
         extract_display_name(base_name, c->display, sizeof(c->display));
         c->is_disabled = disabled;
+        n++;
     }
     closedir(d);
 
@@ -693,7 +851,8 @@ int scan_tools(bool show_hidden, tool_pak **out, int *count)
 
         /* Must be a directory. */
         char full[SC_MAX_PATH * 2];
-        snprintf(full, sizeof(full), "%s/%s", tools_dir, name);
+        if (!join_path(full, sizeof(full), tools_dir, name))
+            continue;
         struct stat st;
         if (stat(full, &st) != 0 || !S_ISDIR(st.st_mode))
             continue;
@@ -705,7 +864,7 @@ int scan_tools(bool show_hidden, tool_pak **out, int *count)
         if (!ends_with(name, ".pak") && !disabled) continue;
 
         char base_name[SC_MAX_NAME];
-        snprintf(base_name, sizeof(base_name), "%s", name);
+        copy_cstr_trunc(base_name, sizeof(base_name), name);
         if (disabled) {
             /* Strip .pak.disabled -> base name. */
             char *dot = strstr(base_name, ".pak.disabled");
@@ -719,19 +878,20 @@ int scan_tools(bool show_hidden, tool_pak **out, int *count)
         arr = grow_array(arr, &cap, n, sizeof(tool_pak));
         if (!arr) { closedir(d); *out = NULL; *count = 0; return -1; }
 
-        tool_pak *t = &arr[n++];
+        tool_pak *t = &arr[n];
         memset(t, 0, sizeof(*t));
-        snprintf(t->name, sizeof(t->name), "%s", base_name);
-        snprintf(t->path, sizeof(t->path), "%s", full);
+        copy_cstr_trunc(t->name, sizeof(t->name), base_name);
+        if (!copy_cstr_exact(t->path, sizeof(t->path), full)) {
+            ap_log("scan_tools: skipping overlong path %s", full);
+            continue;
+        }
         if (disabled) {
-            /* Ensure "  [disabled]" suffix fits in the display field. */
-            const size_t max_base = sizeof(t->display) - sizeof("  [disabled]");
-            if (strlen(base_name) >= max_base)
-                base_name[max_base - 1] = '\0';
-            snprintf(t->display, sizeof(t->display), "%s  [disabled]",
-                     base_name);
-        } else
-            snprintf(t->display, sizeof(t->display), "%s", base_name);
+            copy_with_suffix_trunc(t->display, sizeof(t->display),
+                                   base_name, "  [disabled]");
+        } else {
+            copy_cstr_trunc(t->display, sizeof(t->display), base_name);
+        }
+        n++;
     }
     closedir(d);
 
@@ -760,7 +920,8 @@ int scan_shortcuts(shortcut_entry **out, int *count)
             continue;
 
         char full[SC_MAX_PATH * 2];
-        snprintf(full, sizeof(full), "%s/%s", roms_dir, ent->d_name);
+        if (!join_path(full, sizeof(full), roms_dir, ent->d_name))
+            continue;
         struct stat st;
         if (stat(full, &st) != 0 || !S_ISDIR(st.st_mode))
             continue;
@@ -776,7 +937,7 @@ int scan_shortcuts(shortcut_entry **out, int *count)
         char display[SC_MAX_DISPLAY];
         char *marker = read_shortcut_marker(full);
         if (marker) {
-            snprintf(display, sizeof(display), "%s", marker);
+            copy_cstr_trunc(display, sizeof(display), marker);
             free(marker);
         } else {
             extract_display_name(name, display, sizeof(display));
@@ -793,18 +954,25 @@ int scan_shortcuts(shortcut_entry **out, int *count)
         arr = grow_array(arr, &cap, n, sizeof(shortcut_entry));
         if (!arr) { closedir(d); *out = NULL; *count = 0; return -1; }
 
-        shortcut_entry *sc = &arr[n++];
+        shortcut_entry *sc = &arr[n];
         memset(sc, 0, sizeof(*sc));
-        snprintf(sc->name, sizeof(sc->name), "%s", name);
-        snprintf(sc->tag, sizeof(sc->tag), "%s", tag);
-        snprintf(sc->display, sizeof(sc->display), "%s", display);
-        snprintf(sc->path, sizeof(sc->path), "%s", full);
+        copy_cstr_trunc(sc->name, sizeof(sc->name), name);
+        copy_cstr_trunc(sc->tag, sizeof(sc->tag), tag);
+        copy_cstr_trunc(sc->display, sizeof(sc->display), display);
+        if (!copy_cstr_exact(sc->path, sizeof(sc->path), full)) {
+            ap_log("scan_shortcuts: skipping overlong path %s", full);
+            continue;
+        }
         sc->is_tool = is_tool;
 
         /* Resolve target. */
         if (is_tool) {
             char target_file[SC_MAX_PATH * 2];
-            snprintf(target_file, sizeof(target_file), "%s/target", full);
+            if (!join_path(target_file, sizeof(target_file), full, "target")) {
+                ap_log("scan_shortcuts: target path too long for %s", full);
+                n++;
+                continue;
+            }
             char *data = read_text_file(target_file);
             if (data) {
                 /* Trim trailing whitespace. */
@@ -812,12 +980,17 @@ int scan_shortcuts(shortcut_entry **out, int *count)
                 while (len > 0 && (data[len-1] == '\n' || data[len-1] == '\r' ||
                                     data[len-1] == ' '))
                     data[--len] = '\0';
-                snprintf(sc->target_path, sizeof(sc->target_path), "%s", data);
+                if (!copy_cstr_exact(sc->target_path, sizeof(sc->target_path), data))
+                    ap_log("scan_shortcuts: ignoring overlong target for %s", full);
                 free(data);
             }
         } else {
             char m3u_file[SC_MAX_PATH * 2];
-            snprintf(m3u_file, sizeof(m3u_file), "%s/%s.m3u", full, name);
+            if (!join_path_with_suffix(m3u_file, sizeof(m3u_file), full, name, ".m3u")) {
+                ap_log("scan_shortcuts: m3u path too long for %s", full);
+                n++;
+                continue;
+            }
             char *data = read_text_file(m3u_file);
             if (data) {
                 int len = (int)strlen(data);
@@ -826,12 +999,16 @@ int scan_shortcuts(shortcut_entry **out, int *count)
                     data[--len] = '\0';
                 /* Resolve and normalize the relative path from the shortcut folder. */
                 char joined[SC_MAX_PATH * 2];
-                snprintf(joined, sizeof(joined), "%s/%s", full, data);
-                normalize_path(joined, sc->target_path,
-                               sizeof(sc->target_path));
+                if (join_path(joined, sizeof(joined), full, data) &&
+                    !normalize_path(joined, sc->target_path,
+                                    sizeof(sc->target_path))) {
+                    ap_log("scan_shortcuts: ignoring overlong normalized target for %s",
+                           full);
+                }
                 free(data);
             }
         }
+        n++;
     }
     closedir(d);
 
@@ -856,7 +1033,8 @@ int create_rom_shortcut(const char *display_name, const char *tag,
     build_folder_name(pos, display_name, tag, folder_name, sizeof(folder_name));
 
     char folder_path[SC_MAX_PATH * 2];
-    snprintf(folder_path, sizeof(folder_path), "%s/%s", roms_dir, folder_name);
+    if (!join_path(folder_path, sizeof(folder_path), roms_dir, folder_name))
+        return -1;
 
     ap_log("create_rom_shortcut: name=%s tag=%s rom=%s pos=%d multi=%d",
            display_name, tag, rom->name, pos, rom->is_multi_disc);
@@ -883,7 +1061,9 @@ int create_rom_shortcut(const char *display_name, const char *tag,
 
     /* Write .m3u file. */
     char m3u_path[SC_MAX_PATH * 2];
-    snprintf(m3u_path, sizeof(m3u_path), "%s/%s.m3u", folder_path, folder_name);
+    if (!join_path_with_suffix(m3u_path, sizeof(m3u_path),
+                               folder_path, folder_name, ".m3u"))
+        return -1;
     if (write_text_file(m3u_path, rel_path) != 0)
         return -1;
 
@@ -896,12 +1076,15 @@ int create_rom_shortcut(const char *display_name, const char *tag,
         char art_src[SC_MAX_PATH * 2];
         /* Get the parent directory of the ROM. */
         char rom_parent[SC_MAX_PATH];
-        snprintf(rom_parent, sizeof(rom_parent), "%s", rom->path);
+        copy_cstr_trunc(rom_parent, sizeof(rom_parent), rom->path);
         char *last_slash = strrchr(rom_parent, '/');
         if (last_slash) *last_slash = '\0';
 
-        snprintf(art_src, sizeof(art_src), "%s/.media/%s.png",
-                 rom_parent, rom->display);
+        if (!join_path(art_src, sizeof(art_src), rom_parent, ".media") ||
+            !append_cstr_exact(art_src, sizeof(art_src), "/") ||
+            !append_cstr_exact(art_src, sizeof(art_src), rom->display) ||
+            !append_cstr_exact(art_src, sizeof(art_src), ".png"))
+            return -1;
 
         bool use_bg, force_blk;
         artwork_bg_params(settings, &use_bg, &force_blk);
@@ -924,7 +1107,8 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
                       folder_name, sizeof(folder_name));
 
     char folder_path[SC_MAX_PATH * 2];
-    snprintf(folder_path, sizeof(folder_path), "%s/%s", roms_dir, folder_name);
+    if (!join_path(folder_path, sizeof(folder_path), roms_dir, folder_name))
+        return -1;
 
     ap_log("create_tool_shortcut: name=%s pak=%s pos=%d",
            display_name, pak_path, pos);
@@ -934,13 +1118,16 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
 
     /* Write target file containing the .pak path. */
     char target_path[SC_MAX_PATH * 2];
-    snprintf(target_path, sizeof(target_path), "%s/target", folder_path);
+    if (!join_path(target_path, sizeof(target_path), folder_path, "target"))
+        return -1;
     if (write_text_file(target_path, pak_path) != 0)
         return -1;
 
     /* Write .m3u pointing to "target". */
     char m3u_path[SC_MAX_PATH * 2];
-    snprintf(m3u_path, sizeof(m3u_path), "%s/%s.m3u", folder_path, folder_name);
+    if (!join_path_with_suffix(m3u_path, sizeof(m3u_path),
+                               folder_path, folder_name, ".m3u"))
+        return -1;
     if (write_text_file(m3u_path, "target") != 0)
         return -1;
 
@@ -950,8 +1137,11 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
     /* Artwork. */
     if (settings->copy_artwork) {
         char art_src[SC_MAX_PATH * 2];
-        snprintf(art_src, sizeof(art_src), "%s/.media/%s.png",
-                 tools_dir, display_name);
+        if (!join_path(art_src, sizeof(art_src), tools_dir, ".media") ||
+            !append_cstr_exact(art_src, sizeof(art_src), "/") ||
+            !append_cstr_exact(art_src, sizeof(art_src), display_name) ||
+            !append_cstr_exact(art_src, sizeof(art_src), ".png"))
+            return -1;
         bool use_bg, force_blk;
         artwork_bg_params(settings, &use_bg, &force_blk);
         generate_artwork_bg(art_src, folder_path, use_bg, force_blk);
@@ -1004,10 +1194,16 @@ void ensure_bridge_emu(void)
     get_emus_path(emus_dir, sizeof(emus_dir));
 
     char pak_dir[SC_MAX_PATH * 2];
-    snprintf(pak_dir, sizeof(pak_dir), "%s/SHORTCUT.pak", emus_dir);
+    if (!join_path(pak_dir, sizeof(pak_dir), emus_dir, "SHORTCUT.pak")) {
+        ap_log("ensure_bridge_emu: pak path too long");
+        return;
+    }
 
     char launch_path[SC_MAX_PATH * 2];
-    snprintf(launch_path, sizeof(launch_path), "%s/launch.sh", pak_dir);
+    if (!join_path(launch_path, sizeof(launch_path), pak_dir, "launch.sh")) {
+        ap_log("ensure_bridge_emu: launch path too long");
+        return;
+    }
 
     struct stat st;
     if (stat(launch_path, &st) == 0) {

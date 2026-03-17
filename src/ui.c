@@ -705,7 +705,7 @@ void show_settings_screen(void)
 
     ap_footer_item footer[] = {
         { .button = AP_BTN_B, .label = "Back" },
-        { .button = AP_BTN_LEFT, .label = "Change" },
+        { .button = AP_BTN_LEFT, .label = "Change", .button_text = "←/→" },
         { .button = AP_BTN_A, .label = "Save", .is_confirm = true },
     };
 
