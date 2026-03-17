@@ -474,7 +474,11 @@ app_settings load_settings(void)
     if (cJSON_IsBool(ca)) s.copy_artwork = cJSON_IsTrue(ca);
 
     cJSON *am = cJSON_GetObjectItem(json, "artwork_mode");
-    if (cJSON_IsNumber(am)) s.artwork_mode = (art_mode)am->valueint;
+    if (cJSON_IsNumber(am)) {
+        int mode = am->valueint;
+        if (mode >= ART_MODE_BLACK && mode <= ART_MODE_FALLBACK)
+            s.artwork_mode = (art_mode)mode;
+    }
 
     cJSON *sh = cJSON_GetObjectItem(json, "show_hidden");
     if (cJSON_IsBool(sh)) s.show_hidden = cJSON_IsTrue(sh);
@@ -554,7 +558,8 @@ static int write_shortcut_marker(const char *folder_path,
 static bool normalize_path(const char *path, char *out, int out_size)
 {
     char *tmp = NULL;
-    char *parts[SC_MAX_PATH / 2];
+    enum { MAX_PARTS = SC_MAX_PATH / 2 };
+    char *parts[MAX_PARTS];
     int count = 0;
     bool absolute;
 
@@ -580,11 +585,13 @@ static bool normalize_path(const char *path, char *out, int out_size)
             if (count > 0 && strcmp(parts[count - 1], "..") != 0) {
                 count--;
             } else if (!absolute) {
+                if (count >= MAX_PARTS) { free(tmp); out[0] = '\0'; return false; }
                 parts[count++] = token;
             }
             continue;
         }
 
+        if (count >= MAX_PARTS) { free(tmp); out[0] = '\0'; return false; }
         parts[count++] = token;
     }
 
@@ -820,7 +827,13 @@ int scan_roms(const char *console_path, bool show_hidden,
     rom_file *arr = NULL;
     int n = 0, cap = 0;
 
-    scan_roms_internal(console_path, show_hidden, &arr, &n, &cap);
+    int rc = scan_roms_internal(console_path, show_hidden, &arr, &n, &cap);
+    if (rc != 0) {
+        free(arr);
+        *out = NULL;
+        *count = 0;
+        return rc;
+    }
 
     if (n > 1) qsort(arr, n, sizeof(rom_file), cmp_rom_file);
 

@@ -140,6 +140,12 @@ static bool pick_console(console_dir *out)
     /* Build list items. */
     ap_list_item *items = calloc(count, sizeof(ap_list_item));
     char (*labels)[SC_MAX_DISPLAY + 16] = calloc(count, sizeof(*labels));
+    if (!items || !labels) {
+        free(items);
+        free(labels);
+        free(consoles);
+        return false;
+    }
     for (int i = 0; i < count; i++) {
         if (consoles[i].is_disabled)
             snprintf(labels[i], sizeof(labels[i]), "%s  [disabled]",
@@ -195,6 +201,12 @@ static bool pick_rom(const console_dir *console, rom_file *out)
 
     ap_list_item *items = calloc(count, sizeof(ap_list_item));
     char (*labels)[SC_MAX_DISPLAY + 64] = calloc(count, sizeof(*labels));
+    if (!items || !labels) {
+        free(items);
+        free(labels);
+        free(roms);
+        return false;
+    }
     for (int i = 0; i < count; i++) {
         char text[SC_MAX_DISPLAY + 64];
         text[0] = '\0';
@@ -273,6 +285,12 @@ static bool pick_tool(tool_pak *out)
 
     ap_list_item *items = calloc(count, sizeof(ap_list_item));
     char (*labels)[SC_MAX_DISPLAY] = calloc(count, sizeof(*labels));
+    if (!items || !labels) {
+        free(items);
+        free(labels);
+        free(tools);
+        return false;
+    }
     for (int i = 0; i < count; i++) {
         snprintf(labels[i], sizeof(labels[i]), "%s", tools[i].display);
         items[i].label = labels[i];
@@ -556,6 +574,12 @@ void manage_shortcuts_flow(void)
 
         ap_list_item *items = calloc(count, sizeof(ap_list_item));
         char (*labels)[SC_MAX_DISPLAY + 16] = calloc(count, sizeof(*labels));
+        if (!items || !labels) {
+            free(items);
+            free(labels);
+            free(shortcuts);
+            return;
+        }
         for (int i = 0; i < count; i++) {
             const char *kind = shortcuts[i].is_tool ? "Tool" : "ROM";
             snprintf(labels[i], sizeof(labels[i]), "%s  [%s]",
