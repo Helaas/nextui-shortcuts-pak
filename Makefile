@@ -84,10 +84,6 @@ do-package:
 	@mkdir -p $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak
 	@cp $(BUILD_DIR)/$(PLATFORM)/$(APP_NAME) $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/
 	@cp launch.sh pak.json LICENSE $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/
-	@if [ -d "$(BUILD_DIR)/$(PLATFORM)/lib" ]; then \
-		mkdir -p "$(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/lib"; \
-		cp -a "$(BUILD_DIR)/$(PLATFORM)/lib/." "$(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/lib/"; \
-	fi
 	@mkdir -p $(DIST_DIR)/$(PLATFORM)
 	@rm -f $(DIST_DIR)/$(PLATFORM)/$(PAK_NAME).pak.zip
 	@cd $(BUILD_DIR)/$(PLATFORM) && zip -r "$(CURDIR)/$(DIST_DIR)/$(PLATFORM)/$(PAK_NAME).pak.zip" "$(PAK_NAME).pak" -x '.*'
