@@ -2,178 +2,188 @@
 # Shortcuts Pak — Build System
 # ──────────────────────────────────────────────────────────────
 
-APP_NAME   := shortcuts
-PAK_NAME   := Shortcuts
-MODULE     := github.com/Helaas/nextui-shortcuts-pak
-GABAGOOL   := github.com/BrandonKowalski/gabagool/v2
-DOCKER_IMG := ghcr.io/brandonkowalski/quasimodo:latest
+SHELL := /bin/bash
 
-BUILD_DIR  := build
-CACHE_DIR  := .cache
-TOOLCHAIN_CACHE := $(CACHE_DIR)/go-toolchain
+APP_NAME := shortcuts
+PAK_NAME := Shortcuts
+APOSTROPHE_DIR := third_party/apostrophe
+BUILD_DIR := build
+DIST_DIR := $(BUILD_DIR)/release
+STAGING_DIR := $(BUILD_DIR)/staging
+SRC_FILES := $(shell find src -name '*.c' -print | sort)
 
-# ── Platform auto-detection ──────────────────────────────────
+TG5040_TOOLCHAIN := ghcr.io/loveretro/tg5040-toolchain:latest
+TG5050_TOOLCHAIN := ghcr.io/loveretro/tg5050-toolchain:latest
+MY355_TOOLCHAIN  := ghcr.io/loveretro/my355-toolchain:latest
+ADB ?= adb
 
-ifdef PLATFORM
-ifeq ($(PLATFORM),tg5040)
-all: tg5040
-else ifeq ($(PLATFORM),tg5050)
-all: tg5050
-else
-all: mac
-endif
-else ifeq ($(shell uname -s),Darwin)
-all: mac
-else
-all: tg5040
-endif
+COMMON_INCLUDES := -I$(APOSTROPHE_DIR)/include
 
-# ── Native macOS build ───────────────────────────────────────
+.PHONY: all native mac run-mac run-native tg5040 tg5050 my355 \
+	package package-tg5040 package-tg5050 package-my355 do-package \
+	deploy deploy-platform clean help
+
+# ── Default target ──────────────────────────────────────────
+
+native: mac
+run-native: run-mac
+all: tg5040 tg5050 my355
+
+# ── Native macOS build ──────────────────────────────────────
 
 mac:
-	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=1 go build -mod=vendor -o $(BUILD_DIR)/$(APP_NAME) .
+	@mkdir -p $(BUILD_DIR)/mac
+	cc -std=gnu11 -O0 -g \
+		-DPLATFORM_MAC \
+		$(COMMON_INCLUDES) \
+		$(shell pkg-config --cflags sdl2 SDL2_ttf SDL2_image) \
+		-o $(BUILD_DIR)/mac/$(APP_NAME) \
+		$(SRC_FILES) \
+		$(shell pkg-config --libs sdl2 SDL2_ttf SDL2_image) \
+		-lm -lpthread
 
-# ── Docker ARM64 builds ──────────────────────────────────────
+run-mac: mac
+	./$(BUILD_DIR)/mac/$(APP_NAME)
+
+# ── Docker cross-compilation ────────────────────────────────
 
 tg5040:
-	@mkdir -p $(BUILD_DIR)/tg5040/lib $(CACHE_DIR)/go-mod $(CACHE_DIR)/go-build $(TOOLCHAIN_CACHE)
-	docker run --rm --platform linux/arm64 \
-		-v "$(CURDIR)":/build \
-		-v "$(CURDIR)/$(CACHE_DIR)/go-mod":/root/go/pkg/mod \
-		-v "$(CURDIR)/$(CACHE_DIR)/go-build":/root/.cache/go-build \
-		-v "$(CURDIR)/$(TOOLCHAIN_CACHE)":/root/.cache/go-toolchain \
-		-w /build \
-		$(DOCKER_IMG) \
-		sh -c 'GOTOOLCHAINCACHE=/root/.cache/go-toolchain CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -mod=vendor -o $(BUILD_DIR)/tg5040/$(APP_NAME) . && \
-		       cp /usr/lib/aarch64-linux-gnu/libSDL2_gfx-1.0.so.0.0.2 $(BUILD_DIR)/tg5040/lib/libSDL2_gfx-1.0.so.0 && \
-		       cp /usr/lib/aarch64-linux-gnu/libSDL2_gfx-1.0.so.0.0.2 $(BUILD_DIR)/tg5040/lib/libSDL2_gfx-1.0.so.0.0.2'
+	@mkdir -p $(BUILD_DIR)/tg5040
+	docker run --rm \
+		-v "$(CURDIR)":/workspace \
+		$(TG5040_TOOLCHAIN) \
+		make -C /workspace -f ports/tg5040/Makefile BUILD_DIR=/workspace/$(BUILD_DIR)/tg5040
 
 tg5050:
-	@mkdir -p $(BUILD_DIR)/tg5050/lib $(CACHE_DIR)/go-mod $(CACHE_DIR)/go-build $(TOOLCHAIN_CACHE)
-	docker run --rm --platform linux/arm64 \
-		-v "$(CURDIR)":/build \
-		-v "$(CURDIR)/$(CACHE_DIR)/go-mod":/root/go/pkg/mod \
-		-v "$(CURDIR)/$(CACHE_DIR)/go-build":/root/.cache/go-build \
-		-v "$(CURDIR)/$(TOOLCHAIN_CACHE)":/root/.cache/go-toolchain \
-		-w /build \
-		$(DOCKER_IMG) \
-		sh -c 'GOTOOLCHAINCACHE=/root/.cache/go-toolchain CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -mod=vendor -o $(BUILD_DIR)/tg5050/$(APP_NAME) . && \
-		       cp /usr/lib/aarch64-linux-gnu/libSDL2_gfx-1.0.so.0.0.2 $(BUILD_DIR)/tg5050/lib/libSDL2_gfx-1.0.so.0 && \
-		       cp /usr/lib/aarch64-linux-gnu/libSDL2_gfx-1.0.so.0.0.2 $(BUILD_DIR)/tg5050/lib/libSDL2_gfx-1.0.so.0.0.2'
+	@mkdir -p $(BUILD_DIR)/tg5050
+	docker run --rm \
+		-v "$(CURDIR)":/workspace \
+		$(TG5050_TOOLCHAIN) \
+		make -C /workspace -f ports/tg5050/Makefile BUILD_DIR=/workspace/$(BUILD_DIR)/tg5050
 
-embedded: tg5040 tg5050
+my355:
+	@mkdir -p $(BUILD_DIR)/my355
+	docker run --rm \
+		-v "$(CURDIR)":/workspace \
+		$(MY355_TOOLCHAIN) \
+		make -C /workspace -f ports/my355/Makefile BUILD_DIR=/workspace/$(BUILD_DIR)/my355
 
-# ── Vendor patches ────────────────────────────────────────────
-# Gabagool hardcodes /dev/input/event1 for the power button.
-# TG5050 uses /dev/input/event2. This target applies the fix.
-
-GABAGOOL_INIT := vendor/github.com/BrandonKowalski/gabagool/v2/pkg/gabagool/init.go
-GABAGOOL_NEXTVAL := vendor/github.com/BrandonKowalski/gabagool/v2/pkg/gabagool/platform/nextui/theming.go
-
-patch-vendor:
-	@if [ -f "$(GABAGOOL_INIT)" ] && grep -q 'DevicePath:.*"/dev/input/event1"' "$(GABAGOOL_INIT)"; then \
-		echo "Patching Gabagool power button for TG5050 support..."; \
-		cp patches/gabagool-power-button-tg5050.patch /tmp/_gaba_patch.patch; \
-		cd "$(CURDIR)" && git apply --whitespace=nowarn patches/gabagool-power-button-tg5050.patch 2>/dev/null || \
-			patch -p1 < patches/gabagool-power-button-tg5050.patch; \
-		echo "Patch applied."; \
-	else \
-		echo "Gabagool power button patch already applied (or vendor not present)."; \
-	fi
-	@if [ -f "$(GABAGOOL_NEXTVAL)" ] && ! grep -q 'platformEnv := strings.ToLower' "$(GABAGOOL_NEXTVAL)"; then \
-		echo "Patching Gabagool nextval path for TG5050 support..."; \
-		cp patches/gabagool-nextval-path-tg5050.patch /tmp/_gaba_nextval_patch.patch; \
-		cd "$(CURDIR)" && git apply --whitespace=nowarn patches/gabagool-nextval-path-tg5050.patch 2>/dev/null || \
-			patch -p1 < patches/gabagool-nextval-path-tg5050.patch; \
-		echo "Patch applied."; \
-	else \
-		echo "Gabagool nextval path patch already applied (or vendor not present)."; \
-	fi
-
-# ── Dependency management ────────────────────────────────────
-
-deps:
-	go get $(GABAGOOL)@latest
-	go mod tidy
-	go mod vendor
-	$(MAKE) patch-vendor
-
-# ── Packaging ────────────────────────────────────────────────
+# ── Packaging ───────────────────────────────────────────────
 
 package-tg5040: tg5040
-	@rm -rf $(BUILD_DIR)/pak-stage
-	@mkdir -p $(BUILD_DIR)/pak-stage/resources/lib
-	@mkdir -p $(BUILD_DIR)/release/tg5040
-	cp $(BUILD_DIR)/tg5040/$(APP_NAME) $(BUILD_DIR)/pak-stage/
-	cp launch.sh $(BUILD_DIR)/pak-stage/
-	cp pak.json $(BUILD_DIR)/pak-stage/
-	cp LICENSE $(BUILD_DIR)/pak-stage/ 2>/dev/null || true
-	cp $(BUILD_DIR)/tg5040/lib/* $(BUILD_DIR)/pak-stage/resources/lib/
-	cd $(BUILD_DIR)/pak-stage && zip -r "$(CURDIR)/$(BUILD_DIR)/release/tg5040/$(PAK_NAME).pak.zip" . -x '.*'
-	@rm -rf $(BUILD_DIR)/pak-stage
+	@$(MAKE) do-package PLATFORM=tg5040
 
 package-tg5050: tg5050
-	@rm -rf $(BUILD_DIR)/pak-stage
-	@mkdir -p $(BUILD_DIR)/pak-stage/resources/lib
-	@mkdir -p $(BUILD_DIR)/release/tg5050
-	cp $(BUILD_DIR)/tg5050/$(APP_NAME) $(BUILD_DIR)/pak-stage/
-	cp launch.sh $(BUILD_DIR)/pak-stage/
-	cp pak.json $(BUILD_DIR)/pak-stage/
-	cp LICENSE $(BUILD_DIR)/pak-stage/ 2>/dev/null || true
-	cp $(BUILD_DIR)/tg5050/lib/* $(BUILD_DIR)/pak-stage/resources/lib/
-	cd $(BUILD_DIR)/pak-stage && zip -r "$(CURDIR)/$(BUILD_DIR)/release/tg5050/$(PAK_NAME).pak.zip" . -x '.*'
-	@rm -rf $(BUILD_DIR)/pak-stage
+	@$(MAKE) do-package PLATFORM=tg5050
 
-package: package-tg5040 package-tg5050
+package-my355: my355
+	@$(MAKE) do-package PLATFORM=my355
 
-# ── TrimUI .pakz export ──────────────────────────────────────
+do-package:
+	@rm -rf $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak
+	@mkdir -p $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak
+	@cp $(BUILD_DIR)/$(PLATFORM)/$(APP_NAME) $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/
+	@cp launch.sh pak.json LICENSE $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/
+	@if [ -d "$(BUILD_DIR)/$(PLATFORM)/lib" ]; then \
+		mkdir -p "$(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/lib"; \
+		cp -a "$(BUILD_DIR)/$(PLATFORM)/lib/." "$(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/lib/"; \
+	fi
+	@mkdir -p $(DIST_DIR)/$(PLATFORM)
+	@rm -f $(DIST_DIR)/$(PLATFORM)/$(PAK_NAME).pak.zip
+	@cd $(BUILD_DIR)/$(PLATFORM) && zip -r "$(CURDIR)/$(DIST_DIR)/$(PLATFORM)/$(PAK_NAME).pak.zip" "$(PAK_NAME).pak" -x '.*'
 
-export-trimui: embedded
-	@rm -rf $(BUILD_DIR)/trimui-stage
-	@mkdir -p $(BUILD_DIR)/trimui-stage/Tools/tg5040/$(PAK_NAME).pak/resources/lib
-	@mkdir -p $(BUILD_DIR)/trimui-stage/Tools/tg5050/$(PAK_NAME).pak/resources/lib
-	@mkdir -p $(BUILD_DIR)/release/trimui
-	cp $(BUILD_DIR)/tg5040/$(APP_NAME) $(BUILD_DIR)/trimui-stage/Tools/tg5040/$(PAK_NAME).pak/
-	cp launch.sh $(BUILD_DIR)/trimui-stage/Tools/tg5040/$(PAK_NAME).pak/
-	cp pak.json $(BUILD_DIR)/trimui-stage/Tools/tg5040/$(PAK_NAME).pak/
-	cp LICENSE $(BUILD_DIR)/trimui-stage/Tools/tg5040/$(PAK_NAME).pak/ 2>/dev/null || true
-	cp $(BUILD_DIR)/tg5040/lib/* $(BUILD_DIR)/trimui-stage/Tools/tg5040/$(PAK_NAME).pak/resources/lib/
-	cp $(BUILD_DIR)/tg5050/$(APP_NAME) $(BUILD_DIR)/trimui-stage/Tools/tg5050/$(PAK_NAME).pak/
-	cp launch.sh $(BUILD_DIR)/trimui-stage/Tools/tg5050/$(PAK_NAME).pak/
-	cp pak.json $(BUILD_DIR)/trimui-stage/Tools/tg5050/$(PAK_NAME).pak/
-	cp LICENSE $(BUILD_DIR)/trimui-stage/Tools/tg5050/$(PAK_NAME).pak/ 2>/dev/null || true
-	cp $(BUILD_DIR)/tg5050/lib/* $(BUILD_DIR)/trimui-stage/Tools/tg5050/$(PAK_NAME).pak/resources/lib/
+package: package-tg5040 package-tg5050 package-my355
+	@rm -rf $(STAGING_DIR)
+	@mkdir -p $(STAGING_DIR)/Tools/tg5040 $(STAGING_DIR)/Tools/tg5050 $(STAGING_DIR)/Tools/my355
+	@cp -a $(BUILD_DIR)/tg5040/$(PAK_NAME).pak $(STAGING_DIR)/Tools/tg5040/
+	@cp -a $(BUILD_DIR)/tg5050/$(PAK_NAME).pak $(STAGING_DIR)/Tools/tg5050/
+	@cp -a $(BUILD_DIR)/my355/$(PAK_NAME).pak $(STAGING_DIR)/Tools/my355/
 	@# Include SHORTCUT.pak bridge emu for tool shortcuts
-	@mkdir -p $(BUILD_DIR)/trimui-stage/Emus/tg5040/SHORTCUT.pak
-	@mkdir -p $(BUILD_DIR)/trimui-stage/Emus/tg5050/SHORTCUT.pak
-	cp resources/SHORTCUT.pak/launch.sh $(BUILD_DIR)/trimui-stage/Emus/tg5040/SHORTCUT.pak/
-	cp resources/SHORTCUT.pak/launch.sh $(BUILD_DIR)/trimui-stage/Emus/tg5050/SHORTCUT.pak/
-	cd $(BUILD_DIR)/trimui-stage && zip -9 -r "$(CURDIR)/$(BUILD_DIR)/release/trimui/$(PAK_NAME).pakz" . -x '.*'
-	@rm -rf $(BUILD_DIR)/trimui-stage
+	@mkdir -p $(STAGING_DIR)/Emus/tg5040/SHORTCUT.pak $(STAGING_DIR)/Emus/tg5050/SHORTCUT.pak $(STAGING_DIR)/Emus/my355/SHORTCUT.pak
+	@cp resources/SHORTCUT.pak/launch.sh $(STAGING_DIR)/Emus/tg5040/SHORTCUT.pak/
+	@cp resources/SHORTCUT.pak/launch.sh $(STAGING_DIR)/Emus/tg5050/SHORTCUT.pak/
+	@cp resources/SHORTCUT.pak/launch.sh $(STAGING_DIR)/Emus/my355/SHORTCUT.pak/
+	@mkdir -p $(DIST_DIR)/all
+	@rm -f $(DIST_DIR)/all/$(PAK_NAME).pakz
+	@cd $(STAGING_DIR) && zip -9 -r "$(CURDIR)/$(DIST_DIR)/all/$(PAK_NAME).pakz" . -x '.*'
 
-# ── Cleanup ───────────────────────────────────────────────────
+# ── ADB deploy ──────────────────────────────────────────────
+
+deploy:
+	@echo "Detecting platform..."
+	@SERIAL="$(ADB_SERIAL)"; \
+	if [ -z "$$SERIAL" ]; then \
+		SERIAL=$$($(ADB) devices | awk 'NR>1 && $$2=="device" {print $$1; exit}'); \
+	fi; \
+	if [ -z "$$SERIAL" ]; then \
+		echo "Error: No online adb device found."; \
+		exit 1; \
+	fi; \
+	ADB_CMD="$(ADB) -s $$SERIAL"; \
+	FINGERPRINT=$$($$ADB_CMD shell ' \
+		cat /proc/device-tree/compatible 2>/dev/null; \
+		echo; \
+		cat /proc/device-tree/model 2>/dev/null; \
+		echo; \
+		uname -a 2>/dev/null' 2>/dev/null | tr '\000' '\n' | tr -d '\r'); \
+	case "$$FINGERPRINT" in \
+		*rk3566*|*miyoo-355*) PLATFORM=my355 ;; \
+		*allwinner,a523*|*sun55iw3*) PLATFORM=tg5050 ;; \
+		*allwinner,a133*|*sun50iw*) PLATFORM=tg5040 ;; \
+		*allwinner*) \
+			if printf '%s' "$$FINGERPRINT" | grep -qi 'a523'; then \
+				PLATFORM=tg5050; \
+			else \
+				PLATFORM=tg5040; \
+			fi \
+			;; \
+		*) \
+			echo "Error: Could not detect a supported platform from adb fingerprint."; \
+			echo "  Serial: $$SERIAL"; \
+			echo "  Fingerprint snippet: $$(printf '%s' "$$FINGERPRINT" | head -c 240)"; \
+			exit 1; \
+			;; \
+	esac; \
+	echo "Detected adb serial: $$SERIAL"; \
+	echo "Detected platform: $$PLATFORM"; \
+	$(MAKE) deploy-platform PLATFORM=$$PLATFORM SERIAL=$$SERIAL
+
+deploy-platform:
+	@if [ -z "$(PLATFORM)" ] || [ -z "$(SERIAL)" ]; then \
+		echo "Error: deploy-platform requires PLATFORM and SERIAL."; \
+		exit 1; \
+	fi
+	@$(MAKE) package-$(PLATFORM)
+	@ADB_CMD="$(ADB) -s $(SERIAL)"; \
+	TOOLS_ROOT="/mnt/SDCARD/Tools/$(PLATFORM)"; \
+	TOOLS_DIR="$$TOOLS_ROOT/$(PAK_NAME).pak"; \
+	EMUS_ROOT="/mnt/SDCARD/Emus/$(PLATFORM)"; \
+	EMUS_DIR="$$EMUS_ROOT/SHORTCUT.pak"; \
+	echo "Deploying $(PAK_NAME).pak to $$TOOLS_DIR..."; \
+	$$ADB_CMD shell "rm -rf '$$TOOLS_DIR' && mkdir -p '$$TOOLS_ROOT'"; \
+	$$ADB_CMD push "$(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak" "$$TOOLS_ROOT/"; \
+	echo "Deploying SHORTCUT.pak bridge emu to $$EMUS_DIR..."; \
+	$$ADB_CMD shell "mkdir -p '$$EMUS_DIR'"; \
+	$$ADB_CMD push "resources/SHORTCUT.pak/launch.sh" "$$EMUS_DIR/"; \
+	echo "Deploy complete."
+
+# ── Cleanup ─────────────────────────────────────────────────
 
 clean:
 	rm -rf $(BUILD_DIR)
 
-clean-all: clean
-	rm -rf $(CACHE_DIR)
-
-# ── Help ──────────────────────────────────────────────────────
+# ── Help ────────────────────────────────────────────────────
 
 help:
 	@echo "Targets:"
-	@echo "  all           Auto-detect platform and build"
+	@echo "  native        Build the mac development binary"
+	@echo "  run-native    Build and run the mac binary"
+	@echo "  all           Build tg5040, tg5050, and my355"
 	@echo "  mac           Build for macOS (native)"
-	@echo "  tg5040        Build for TG5040 (Docker ARM64)"
-	@echo "  tg5050        Build for TG5050 (Docker ARM64)"
-	@echo "  embedded      Build all embedded platforms"
-	@echo "  deps          Update Go dependencies + apply patches"
-	@echo "  patch-vendor  Apply vendor patches (TG5050 power button)"
-	@echo "  package       Package both platforms (.pak.zip)"
-	@echo "  export-trimui Create .pakz for TrimUI Tools"
+	@echo "  run-mac       Build and run for macOS"
+	@echo "  tg5040        Build for TG5040 (Docker cross-compile)"
+	@echo "  tg5050        Build for TG5050 (Docker cross-compile)"
+	@echo "  my355         Build for Miyoo Flip (Docker cross-compile)"
+	@echo "  package       Package all platforms (.pak.zip + .pakz)"
+	@echo "  deploy        Detect adb platform, package, and push"
 	@echo "  clean         Remove build artifacts"
-	@echo "  clean-all     Remove build + cache"
-
-.PHONY: all mac tg5040 tg5050 embedded deps patch-vendor package package-tg5040 package-tg5050 export-trimui clean clean-all help
