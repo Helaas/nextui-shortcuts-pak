@@ -95,28 +95,45 @@ static void blit_cover(SDL_Surface *src, SDL_Surface *dst)
     SDL_BlitScaled(src, &srcRect, dst, NULL);
 }
 
+static uint32_t elapsed_ms(uint32_t start_ms)
+{
+    return SDL_GetTicks() - start_ms;
+}
+
 /* ── Main compositing function ────────────────────────────────── */
 
 void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
                          bool use_global_bg, bool force_black)
 {
+    uint32_t start_ms = SDL_GetTicks();
+    uint32_t art_load_ms = 0;
+    uint32_t bg_load_ms = 0;
+    uint32_t compose_ms = 0;
+    uint32_t save_ms = 0;
     struct stat st;
     SDL_Surface *art_img = NULL;
+    uint32_t step_ms = SDL_GetTicks();
 
     if (stat(art_src_path, &st) == 0) {
         art_img = IMG_Load(art_src_path);
+        art_load_ms = elapsed_ms(step_ms);
         if (!art_img) {
-            ap_log("generate_artwork_bg: load art failed: %s", IMG_GetError());
+            ap_log("generate_artwork_bg: load art failed: %s (art=%ums total=%ums)",
+                   IMG_GetError(), art_load_ms, elapsed_ms(start_ms));
             return;
         }
     } else if (!force_black) {
+        art_load_ms = elapsed_ms(step_ms);
         return; /* No art and not forcing — skip. */
+    } else {
+        art_load_ms = elapsed_ms(step_ms);
     }
 
     int screen_w, screen_h;
     get_screen_dimensions(&screen_w, &screen_h);
 
     /* Create canvas. */
+    step_ms = SDL_GetTicks();
     SDL_Surface *canvas = create_rgba_surface(screen_w, screen_h);
     if (!canvas) {
         if (art_img) SDL_FreeSurface(art_img);
@@ -126,14 +143,19 @@ void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
     /* Fill with opaque black. */
     SDL_FillRect(canvas, NULL,
                  SDL_MapRGBA(canvas->format, 0, 0, 0, 255));
+    compose_ms += elapsed_ms(step_ms);
 
     /* Layer 1: global bg.png (scaled to cover, centre-crop). */
     if (use_global_bg) {
         char bg_path[SC_MAX_PATH];
         get_global_bg_path(bg_path, sizeof(bg_path));
+        step_ms = SDL_GetTicks();
         SDL_Surface *bg_img = IMG_Load(bg_path);
+        bg_load_ms = elapsed_ms(step_ms);
         if (bg_img) {
+            step_ms = SDL_GetTicks();
             blit_cover(bg_img, canvas);
+            compose_ms += elapsed_ms(step_ms);
             SDL_FreeSurface(bg_img);
         }
     }
@@ -145,6 +167,7 @@ void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
      *   vertically centred at screen_h/2
      */
     if (art_img) {
+        step_ms = SDL_GetTicks();
         int maxW = (int)(screen_w * 0.45);
         int maxH = (int)(screen_h * 0.60);
         int artW, artH;
@@ -172,21 +195,32 @@ void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
 
             SDL_FreeSurface(scaled_art);
         }
+        compose_ms += elapsed_ms(step_ms);
         SDL_FreeSurface(art_img);
     }
 
     /* Save composite to .media/bg.png. */
     char media_dir[SC_MAX_PATH];
     snprintf(media_dir, sizeof(media_dir), "%s/.media", dest_folder);
+    step_ms = SDL_GetTicks();
     ensure_dir_exists(media_dir);
 
     char out_path[SC_MAX_PATH * 2];
     snprintf(out_path, sizeof(out_path), "%s/bg.png", media_dir);
-    IMG_SavePNG(canvas, out_path);
+    int save_rc = IMG_SavePNG(canvas, out_path);
+    save_ms = elapsed_ms(step_ms);
     SDL_FreeSurface(canvas);
 
-    ap_log("generate_artwork_bg: %s/.media/bg.png (%dx%d)",
-           dest_folder, screen_w, screen_h);
+    if (save_rc != 0) {
+        ap_log("generate_artwork_bg: save failed: %s (art=%ums bg=%ums compose=%ums save=%ums total=%ums)",
+               IMG_GetError(), art_load_ms, bg_load_ms, compose_ms, save_ms,
+               elapsed_ms(start_ms));
+        return;
+    }
+
+    ap_log("generate_artwork_bg: %s/.media/bg.png (%dx%d) art=%ums bg=%ums compose=%ums save=%ums total=%ums",
+           dest_folder, screen_w, screen_h, art_load_ms, bg_load_ms,
+           compose_ms, save_ms, elapsed_ms(start_ms));
 }
 
 /* ── Source art path resolution ────────────────────────────────── */
@@ -240,6 +274,7 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
 
 int regenerate_all_media(const app_settings *settings)
 {
+    uint32_t start_ms = SDL_GetTicks();
     shortcut_entry *shortcuts = NULL;
     int count = 0;
     if (scan_shortcuts(&shortcuts, &count) != 0)
@@ -254,7 +289,8 @@ int regenerate_all_media(const app_settings *settings)
         generate_artwork_bg(art_src, shortcuts[i].path, use_bg, force_blk);
     }
 
-    ap_log("regenerate_all_media: processed %d shortcuts", count);
+    ap_log("regenerate_all_media: processed %d shortcuts in %ums",
+           count, elapsed_ms(start_ms));
     free(shortcuts);
     return 0;
 }

@@ -334,12 +334,41 @@ typedef struct {
     app_settings settings;
 } create_rom_args;
 
-static int create_rom_worker(void *userdata)
+typedef int (*worker_fn)(void *userdata);
+
+static int run_with_artwork_cpu_speed(worker_fn fn, void *userdata,
+                                      bool boost_cpu, const char *op_name)
+{
+    int rc;
+
+    if (!boost_cpu)
+        return fn(userdata);
+
+    if (ap_set_cpu_speed(AP_CPU_SPEED_NORMAL) != AP_OK)
+        ap_log("%s: failed to boost CPU to normal speed", op_name);
+
+    rc = fn(userdata);
+
+    if (ap_set_cpu_speed(AP_CPU_SPEED_MENU) != AP_OK)
+        ap_log("%s: failed to restore CPU to menu speed", op_name);
+
+    return rc;
+}
+
+static int create_rom_worker_run(void *userdata)
 {
     create_rom_args *args = (create_rom_args *)userdata;
     return create_rom_shortcut(args->display_name, args->tag,
                                args->console_dir_name, &args->rom,
                                args->pos, &args->settings);
+}
+
+static int create_rom_worker(void *userdata)
+{
+    create_rom_args *args = (create_rom_args *)userdata;
+    return run_with_artwork_cpu_speed(create_rom_worker_run, userdata,
+                                      args->settings.copy_artwork,
+                                      "create_rom_worker");
 }
 
 typedef struct {
@@ -349,11 +378,19 @@ typedef struct {
     app_settings settings;
 } create_tool_args;
 
-static int create_tool_worker(void *userdata)
+static int create_tool_worker_run(void *userdata)
 {
     create_tool_args *args = (create_tool_args *)userdata;
     return create_tool_shortcut(args->display_name, args->pak_path,
                                 args->pos, &args->settings);
+}
+
+static int create_tool_worker(void *userdata)
+{
+    create_tool_args *args = (create_tool_args *)userdata;
+    return run_with_artwork_cpu_speed(create_tool_worker_run, userdata,
+                                      args->settings.copy_artwork,
+                                      "create_tool_worker");
 }
 
 typedef struct {
@@ -370,10 +407,16 @@ typedef struct {
     app_settings settings;
 } regen_args;
 
-static int regen_worker(void *userdata)
+static int regen_worker_run(void *userdata)
 {
     regen_args *args = (regen_args *)userdata;
     return regenerate_all_media(&args->settings);
+}
+
+static int regen_worker(void *userdata)
+{
+    return run_with_artwork_cpu_speed(regen_worker_run, userdata, true,
+                                      "regen_worker");
 }
 
 static int remove_media_worker(void *userdata)
@@ -720,7 +763,7 @@ void show_settings_screen(void)
             .selected_option = (int)settings.artwork_mode,
         },
         {
-            .label = "Show hidden/disabled/empty ROMs",
+            .label = "Show hidden & disabled ROMs",
             .options = hidden_opts,
             .option_count = 2,
             .selected_option = settings.show_hidden ? 1 : 0,
@@ -740,6 +783,7 @@ void show_settings_screen(void)
         .footer = footer,
         .footer_count = 3,
         .confirm_button = AP_BTN_A,
+        .label_font = ap_get_font(AP_FONT_MEDIUM),
     };
 
     ap_options_list_result result = {0};
