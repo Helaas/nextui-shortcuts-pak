@@ -42,10 +42,8 @@ int main(int argc, char *argv[])
     (void)argc;
     (void)argv;
 
-#if defined(PLATFORM_TG5040)
     const char *dev = getenv("DEVICE");
     g_is_brick = (dev && strcasecmp(dev, "brick") == 0);
-#endif
 
     ap_config cfg = {0};
     cfg.window_title = "Shortcuts";

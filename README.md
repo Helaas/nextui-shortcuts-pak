@@ -1,6 +1,6 @@
 # Shortcuts
 
-Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050 devices. This Pak uses Gabagool for a native UI and builds the shortcut folders and .m3u files that NextUI auto-launches.
+Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050/my355 devices. This Pak uses Apostrophe for a native UI and builds the shortcut folders and `.m3u` files that NextUI auto-launches.
 
 ## Supported Platforms
 
@@ -9,6 +9,7 @@ Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050
 | `tg5040` (TG5040) | TrimUI Smart Pro | 1280×720 | Docker (ARM64) |
 | `tg5040` (TG3040) | TrimUI Brick | 1024×768 | Docker (ARM64) |
 | `tg5050` | TrimUI Smart Pro S | 1280×720 | Docker (ARM64) |
+| `my355` | Miyoo Flip | 640×480 | Docker (ARM64) |
 
 > The Brick and Smart Pro share the same `tg5040` filesystem layout (tools, roms, settings paths are identical). The pak auto-detects the Brick via the `DEVICE` environment variable (`"brick"` vs `"smartpro"`), which NextUI's `launch.sh` exports at startup, and generates correctly sized `bg.png` images at 1024×768.
 
@@ -206,41 +207,37 @@ The platform is read from `PLATFORM`. If not set, it defaults to `tg5040`.
 
 **macOS (development):**
 ```bash
-brew install go sdl2 sdl2_ttf sdl2_image sdl2_gfx
+brew install sdl2 sdl2_ttf sdl2_image
 ```
 
-**Embedded (tg5040/tg5050):**
+**Embedded (tg5040/tg5050/my355):**
 - Docker with ARM64 support
 
 ### First-Time Setup
 
 ```bash
-make deps
+git submodule update --init --recursive
 ```
-
-This vendors dependencies and applies the Gabagool power button patch for tg5050.
 
 ### Build Commands
 
 ```bash
-# Auto-detect platform and build
-make
+# Build all embedded platforms
+make all
 
-# Build for specific platform
+# Build for macOS development
+make mac
+
+# Build for a specific platform
 make tg5040
 make tg5050
+make my355
 
-# Build for all embedded platforms
-make embedded
-
-# Package as .pak bundles for NextUI
+# Package .pak.zip files per platform and a combined .pakz
 make package
 
-# Export TrimUI .pakz (Tools/tg5040 + Tools/tg5050 layout)
-make export-trimui
-
-# Update dependencies and re-apply patches
-make deps
+# Detect an adb target and deploy the matching build
+make deploy
 
 # See all targets
 make help
@@ -252,20 +249,21 @@ make help
 |--------|--------|
 | tg5040 | `build/release/tg5040/Shortcuts.pak.zip` |
 | tg5050 | `build/release/tg5050/Shortcuts.pak.zip` |
-| export-trimui | `build/release/trimui/Shortcuts.pakz` |
+| my355 | `build/release/my355/Shortcuts.pak.zip` |
+| package | `build/release/all/Shortcuts.pakz` |
 
-The `.pak.zip` includes the binary, `launch.sh`, `pak.json`, `LICENSE`, and required shared libraries.
+The `.pak.zip` includes the binary, `launch.sh`, `pak.json`, `LICENSE`, and any staged runtime libraries.
 
 ## Installing on a Handheld
 
-1. Build and package: `make package` or `make export-trimui`
-2. If using `make package`, extract `Shortcuts.pak.zip` to your SD card as `Tools/<platform>/Shortcuts.pak/`
-3. If using `make export-trimui`, place `Shortcuts.pakz` in the root of your SD card; NextUI will auto-install it upon (re)boot
+1. Build and package: `make package`
+2. To install a single-platform build manually, extract `build/release/<platform>/Shortcuts.pak.zip` to `Tools/<platform>/Shortcuts.pak/` on your SD card
+3. To use the combined package, place `build/release/all/Shortcuts.pakz` in the root of your SD card; NextUI will auto-install it upon (re)boot
 4. Launch from the NextUI Tools menu
 
 ## Acknowledgements
 
-Built with [Gabagool](https://github.com/BrandonKowalski/gabagool) by [@BrandonKowalski](https://github.com/BrandonKowalski).
+Built with [Apostrophe](https://github.com/Helaas/Apostrophe). The original Go version of this pak was built with [Gabagool](https://github.com/BrandonKowalski/gabagool) by [@BrandonKowalski](https://github.com/BrandonKowalski).
 
 ## License
 

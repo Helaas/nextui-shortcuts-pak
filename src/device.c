@@ -398,7 +398,7 @@ void artwork_bg_params(const app_settings *s, bool *use_global_bg,
 
 static char *read_shortcut_marker(const char *folder_path)
 {
-    char marker[SC_MAX_PATH];
+    char marker[SC_MAX_PATH * 2];
     snprintf(marker, sizeof(marker), "%s/" SHORTCUT_MARKER, folder_path);
     char *data = read_text_file(marker);
     if (!data) return NULL;
@@ -414,9 +414,55 @@ static char *read_shortcut_marker(const char *folder_path)
 static int write_shortcut_marker(const char *folder_path,
                                  const char *display_name)
 {
-    char marker[SC_MAX_PATH];
+    char marker[SC_MAX_PATH * 2];
     snprintf(marker, sizeof(marker), "%s/" SHORTCUT_MARKER, folder_path);
     return write_text_file(marker, display_name);
+}
+
+static void normalize_path(const char *path, char *out, int out_size)
+{
+    char tmp[SC_MAX_PATH];
+    char *parts[SC_MAX_PATH / 2];
+    int count = 0;
+    bool absolute;
+
+    if (!path || !out || out_size <= 0) return;
+
+    snprintf(tmp, sizeof(tmp), "%s", path);
+    absolute = (tmp[0] == '/');
+    out[0] = '\0';
+
+    char *saveptr = NULL;
+    for (char *token = strtok_r(tmp, "/", &saveptr);
+         token != NULL;
+         token = strtok_r(NULL, "/", &saveptr)) {
+        if (token[0] == '\0' || strcmp(token, ".") == 0)
+            continue;
+
+        if (strcmp(token, "..") == 0) {
+            if (count > 0 && strcmp(parts[count - 1], "..") != 0) {
+                count--;
+            } else if (!absolute) {
+                parts[count++] = token;
+            }
+            continue;
+        }
+
+        parts[count++] = token;
+    }
+
+    if (absolute)
+        snprintf(out, out_size, "/");
+
+    for (int i = 0; i < count; i++) {
+        size_t len = strlen(out);
+        if (len > 0 && out[len - 1] != '/')
+            strncat(out, "/", out_size - strlen(out) - 1);
+        strncat(out, parts[i], out_size - strlen(out) - 1);
+    }
+
+    if (out[0] == '\0')
+        snprintf(out, out_size, absolute ? "/" : ".");
 }
 
 /* ── Scanning — comparison function ───────────────────────────── */
@@ -476,7 +522,7 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
             continue;
 
         /* Must be a directory. */
-        char full[SC_MAX_PATH];
+        char full[SC_MAX_PATH * 2];
         snprintf(full, sizeof(full), "%s/%s", roms_dir, ent->d_name);
         struct stat st;
         if (stat(full, &st) != 0 || !S_ISDIR(st.st_mode))
@@ -560,7 +606,7 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
 
         if (S_ISDIR(st.st_mode)) {
             /* Check for multi-disc: {baseName}.m3u inside subfolder. */
-            char check[SC_MAX_PATH];
+            char check[SC_MAX_PATH * 2];
             snprintf(check, sizeof(check), "%s/%s.m3u", full, base_name);
             struct stat m3u_st;
             if (stat(check, &m3u_st) == 0) {
@@ -646,7 +692,7 @@ int scan_tools(bool show_hidden, tool_pak **out, int *count)
         const char *name = ent->d_name;
 
         /* Must be a directory. */
-        char full[SC_MAX_PATH];
+        char full[SC_MAX_PATH * 2];
         snprintf(full, sizeof(full), "%s/%s", tools_dir, name);
         struct stat st;
         if (stat(full, &st) != 0 || !S_ISDIR(st.st_mode))
@@ -677,10 +723,14 @@ int scan_tools(bool show_hidden, tool_pak **out, int *count)
         memset(t, 0, sizeof(*t));
         snprintf(t->name, sizeof(t->name), "%s", base_name);
         snprintf(t->path, sizeof(t->path), "%s", full);
-        if (disabled)
+        if (disabled) {
+            /* Ensure "  [disabled]" suffix fits in the display field. */
+            const size_t max_base = sizeof(t->display) - sizeof("  [disabled]");
+            if (strlen(base_name) >= max_base)
+                base_name[max_base - 1] = '\0';
             snprintf(t->display, sizeof(t->display), "%s  [disabled]",
                      base_name);
-        else
+        } else
             snprintf(t->display, sizeof(t->display), "%s", base_name);
     }
     closedir(d);
@@ -709,7 +759,7 @@ int scan_shortcuts(shortcut_entry **out, int *count)
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
             continue;
 
-        char full[SC_MAX_PATH];
+        char full[SC_MAX_PATH * 2];
         snprintf(full, sizeof(full), "%s/%s", roms_dir, ent->d_name);
         struct stat st;
         if (stat(full, &st) != 0 || !S_ISDIR(st.st_mode))
@@ -753,7 +803,7 @@ int scan_shortcuts(shortcut_entry **out, int *count)
 
         /* Resolve target. */
         if (is_tool) {
-            char target_file[SC_MAX_PATH];
+            char target_file[SC_MAX_PATH * 2];
             snprintf(target_file, sizeof(target_file), "%s/target", full);
             char *data = read_text_file(target_file);
             if (data) {
@@ -766,7 +816,7 @@ int scan_shortcuts(shortcut_entry **out, int *count)
                 free(data);
             }
         } else {
-            char m3u_file[SC_MAX_PATH];
+            char m3u_file[SC_MAX_PATH * 2];
             snprintf(m3u_file, sizeof(m3u_file), "%s/%s.m3u", full, name);
             char *data = read_text_file(m3u_file);
             if (data) {
@@ -774,9 +824,11 @@ int scan_shortcuts(shortcut_entry **out, int *count)
                 while (len > 0 && (data[len-1] == '\n' || data[len-1] == '\r' ||
                                     data[len-1] == ' '))
                     data[--len] = '\0';
-                /* Resolve relative path from shortcut folder. */
-                snprintf(sc->target_path, sizeof(sc->target_path),
-                         "%s/%s", full, data);
+                /* Resolve and normalize the relative path from the shortcut folder. */
+                char joined[SC_MAX_PATH * 2];
+                snprintf(joined, sizeof(joined), "%s/%s", full, data);
+                normalize_path(joined, sc->target_path,
+                               sizeof(sc->target_path));
                 free(data);
             }
         }
@@ -803,7 +855,7 @@ int create_rom_shortcut(const char *display_name, const char *tag,
     char folder_name[SC_MAX_NAME];
     build_folder_name(pos, display_name, tag, folder_name, sizeof(folder_name));
 
-    char folder_path[SC_MAX_PATH];
+    char folder_path[SC_MAX_PATH * 2];
     snprintf(folder_path, sizeof(folder_path), "%s/%s", roms_dir, folder_name);
 
     ap_log("create_rom_shortcut: name=%s tag=%s rom=%s pos=%d multi=%d",
@@ -830,7 +882,7 @@ int create_rom_shortcut(const char *display_name, const char *tag,
     }
 
     /* Write .m3u file. */
-    char m3u_path[SC_MAX_PATH];
+    char m3u_path[SC_MAX_PATH * 2];
     snprintf(m3u_path, sizeof(m3u_path), "%s/%s.m3u", folder_path, folder_name);
     if (write_text_file(m3u_path, rel_path) != 0)
         return -1;
@@ -841,7 +893,7 @@ int create_rom_shortcut(const char *display_name, const char *tag,
     /* Artwork. */
     if (settings->copy_artwork) {
         /* Source art: <rom_parent_dir>/.media/<rom_display>.png */
-        char art_src[SC_MAX_PATH];
+        char art_src[SC_MAX_PATH * 2];
         /* Get the parent directory of the ROM. */
         char rom_parent[SC_MAX_PATH];
         snprintf(rom_parent, sizeof(rom_parent), "%s", rom->path);
@@ -871,7 +923,7 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
     build_folder_name(pos, display_name, BRIDGE_EMU_TAG,
                       folder_name, sizeof(folder_name));
 
-    char folder_path[SC_MAX_PATH];
+    char folder_path[SC_MAX_PATH * 2];
     snprintf(folder_path, sizeof(folder_path), "%s/%s", roms_dir, folder_name);
 
     ap_log("create_tool_shortcut: name=%s pak=%s pos=%d",
@@ -881,13 +933,13 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
         return -1;
 
     /* Write target file containing the .pak path. */
-    char target_path[SC_MAX_PATH];
+    char target_path[SC_MAX_PATH * 2];
     snprintf(target_path, sizeof(target_path), "%s/target", folder_path);
     if (write_text_file(target_path, pak_path) != 0)
         return -1;
 
     /* Write .m3u pointing to "target". */
-    char m3u_path[SC_MAX_PATH];
+    char m3u_path[SC_MAX_PATH * 2];
     snprintf(m3u_path, sizeof(m3u_path), "%s/%s.m3u", folder_path, folder_name);
     if (write_text_file(m3u_path, "target") != 0)
         return -1;
@@ -897,7 +949,7 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
 
     /* Artwork. */
     if (settings->copy_artwork) {
-        char art_src[SC_MAX_PATH];
+        char art_src[SC_MAX_PATH * 2];
         snprintf(art_src, sizeof(art_src), "%s/.media/%s.png",
                  tools_dir, display_name);
         bool use_bg, force_blk;
@@ -925,7 +977,7 @@ bool shortcut_exists(const char *display_name, const char *tag)
         char folder_name[SC_MAX_NAME];
         build_folder_name(positions[i], display_name, tag,
                           folder_name, sizeof(folder_name));
-        char full[SC_MAX_PATH];
+        char full[SC_MAX_PATH * 2];
         snprintf(full, sizeof(full), "%s/%s", roms_dir, folder_name);
         struct stat st;
         if (stat(full, &st) == 0) return true;
@@ -951,10 +1003,10 @@ void ensure_bridge_emu(void)
     char emus_dir[SC_MAX_PATH];
     get_emus_path(emus_dir, sizeof(emus_dir));
 
-    char pak_dir[SC_MAX_PATH];
+    char pak_dir[SC_MAX_PATH * 2];
     snprintf(pak_dir, sizeof(pak_dir), "%s/SHORTCUT.pak", emus_dir);
 
-    char launch_path[SC_MAX_PATH];
+    char launch_path[SC_MAX_PATH * 2];
     snprintf(launch_path, sizeof(launch_path), "%s/launch.sh", pak_dir);
 
     struct stat st;

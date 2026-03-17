@@ -186,7 +186,7 @@ static bool pick_rom(const console_dir *console, rom_file *out)
 
     if (scan_roms(console->path, settings.show_hidden, &roms, &count) != 0 ||
         count == 0) {
-        char msg[256];
+        char msg[SC_MAX_DISPLAY + 32];
         snprintf(msg, sizeof(msg), "No ROMs found in %s.", console->display);
         show_error(count == 0 ? msg : "Could not read ROMs.");
         free(roms);
@@ -379,7 +379,7 @@ void add_rom_shortcut_flow(void)
            console.display, rom.name, rom.is_multi_disc);
 
     if (shortcut_exists(display_name, console.tag)) {
-        char msg[512];
+        char msg[SC_MAX_DISPLAY + 64];
         snprintf(msg, sizeof(msg),
                  "A shortcut for \"%s\" already exists.", display_name);
         show_error(msg);
@@ -401,7 +401,7 @@ void add_rom_shortcut_flow(void)
     else if (rom.is_cue_folder)
         snprintf(rom_desc, sizeof(rom_desc), "%s  [CUE folder]", rom.name);
 
-    char msg[1024];
+    char msg[2048];
     snprintf(msg, sizeof(msg),
              "Create shortcut?\n\n%s\n\nConsole: %s\nROM: %s",
              folder_name, console.display, rom_desc);
@@ -440,7 +440,7 @@ void add_tool_shortcut_flow(void)
     ap_log("ui: add tool shortcut: tool=%s", tool.name);
 
     if (shortcut_exists(display_name, BRIDGE_EMU_TAG)) {
-        char msg[512];
+        char msg[SC_MAX_DISPLAY + 64];
         snprintf(msg, sizeof(msg),
                  "A shortcut for \"%s\" already exists.", display_name);
         show_error(msg);
@@ -454,7 +454,7 @@ void add_tool_shortcut_flow(void)
     build_folder_name(pos, display_name, BRIDGE_EMU_TAG,
                       folder_name, sizeof(folder_name));
 
-    char msg[1024];
+    char msg[2048];
     snprintf(msg, sizeof(msg),
              "Create shortcut?\n\n%s\n\nTool: %s",
              folder_name, tool.name);
@@ -523,7 +523,7 @@ static detail_action show_shortcut_detail(const shortcut_entry *sc)
         return DETAIL_ACTION_BACK;
 
     /* User pressed A — confirm deletion. */
-    char msg[512];
+    char msg[SC_MAX_DISPLAY + 128];
     snprintf(msg, sizeof(msg),
              "Delete shortcut?\n\n%s\n\nThis will remove the shortcut\nfrom the main menu.",
              sc->display);
@@ -715,6 +715,7 @@ void show_settings_screen(void)
         .item_count = 3,
         .footer = footer,
         .footer_count = 3,
+        .confirm_button = AP_BTN_A,
     };
 
     ap_options_list_result result = {0};
@@ -728,5 +729,8 @@ void show_settings_screen(void)
 
     ap_log("ui: settings saving: copy_artwork=%d artwork_mode=%d show_hidden=%d",
            settings.copy_artwork, settings.artwork_mode, settings.show_hidden);
-    save_settings(&settings);
+    if (save_settings(&settings) != 0) {
+        ap_log("ui: settings save failed");
+        show_error("Could not save settings.");
+    }
 }

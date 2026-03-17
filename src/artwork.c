@@ -180,7 +180,7 @@ void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
     snprintf(media_dir, sizeof(media_dir), "%s/.media", dest_folder);
     ensure_dir_exists(media_dir);
 
-    char out_path[SC_MAX_PATH];
+    char out_path[SC_MAX_PATH * 2];
     snprintf(out_path, sizeof(out_path), "%s/bg.png", media_dir);
     IMG_SavePNG(canvas, out_path);
     SDL_FreeSurface(canvas);
@@ -205,7 +205,7 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
     /* Read the .m3u inside the shortcut folder to find the console directory.
      * relPath is "../Console Dir (TAG)/game.rom" — second component is the
      * console dir. */
-    char m3u_path[SC_MAX_PATH];
+    char m3u_path[SC_MAX_PATH + SC_MAX_NAME + 8];
     snprintf(m3u_path, sizeof(m3u_path), "%s/%s.m3u", sc->path, sc->name);
     char *data = read_text_file(m3u_path);
     if (!data) return;
@@ -267,13 +267,13 @@ int remove_all_media(void)
         return -1;
 
     for (int i = 0; i < count; i++) {
-        char bg_path[SC_MAX_PATH];
+        char bg_path[SC_MAX_PATH * 2];
         snprintf(bg_path, sizeof(bg_path), "%s/.media/bg.png",
                  shortcuts[i].path);
         unlink(bg_path);
 
         /* Remove .media dir if empty. */
-        char media_dir[SC_MAX_PATH];
+        char media_dir[SC_MAX_PATH * 2];
         snprintf(media_dir, sizeof(media_dir), "%s/.media",
                  shortcuts[i].path);
         rmdir(media_dir); /* Silently fails if not empty. */
