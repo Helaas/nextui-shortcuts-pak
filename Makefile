@@ -100,7 +100,8 @@ do-package:
 	@rm -rf $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak
 	@mkdir -p $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak
 	@cp $(BUILD_DIR)/$(PLATFORM)/$(APP_NAME) $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/
-	@cp launch.sh pak.json LICENSE $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/
+	@cp launch.sh pak.json $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/
+	@if [ -f LICENSE ]; then cp LICENSE $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/; fi
 	@mkdir -p $(DIST_DIR)/$(PLATFORM)
 	@rm -f $(DIST_DIR)/$(PLATFORM)/$(PAK_NAME).pak.zip
 	@cd $(BUILD_DIR)/$(PLATFORM) && zip -r "$(CURDIR)/$(DIST_DIR)/$(PLATFORM)/$(PAK_NAME).pak.zip" "$(PAK_NAME).pak" -x '.*'

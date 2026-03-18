@@ -1254,14 +1254,20 @@ int create_rom_shortcut(const char *display_name, const char *tag,
     }
     const char *rel_from_roms = rom->path + roms_dir_len + 1;
     char rel_path[SC_MAX_PATH];
+    int rel_path_len;
     if (rom->is_multi_disc) {
-        snprintf(rel_path, sizeof(rel_path), "../%s/%s.m3u",
-                 rel_from_roms, rom->display);
+        rel_path_len = snprintf(rel_path, sizeof(rel_path), "../%s/%s.m3u",
+                                rel_from_roms, rom->display);
     } else if (rom->is_cue_folder) {
-        snprintf(rel_path, sizeof(rel_path), "../%s/%s.cue",
-                 rel_from_roms, rom->display);
+        rel_path_len = snprintf(rel_path, sizeof(rel_path), "../%s/%s.cue",
+                                rel_from_roms, rom->display);
     } else {
-        snprintf(rel_path, sizeof(rel_path), "../%s", rel_from_roms);
+        rel_path_len = snprintf(rel_path, sizeof(rel_path), "../%s",
+                                rel_from_roms);
+    }
+    if (rel_path_len < 0 || (size_t)rel_path_len >= sizeof(rel_path)) {
+        ap_log("create_rom_shortcut: relative path too long");
+        return -1;
     }
 
     /* Write .m3u file. */
@@ -1384,7 +1390,8 @@ bool shortcut_exists(const char *display_name, const char *tag)
                                folder_name, sizeof(folder_name)))
             continue;
         char full[SC_MAX_PATH * 2];
-        snprintf(full, sizeof(full), "%s/%s", roms_dir, folder_name);
+        if (!join_path(full, sizeof(full), roms_dir, folder_name))
+            continue;
         struct stat st;
         if (stat(full, &st) == 0) return true;
     }
@@ -1424,25 +1431,25 @@ int rename_shortcut(const shortcut_entry *sc, const char *new_display)
     struct stat st;
     if (stat(new_folder_path, &st) == 0) return -1;
 
-    /* Rename .m3u file inside the folder (content unchanged). */
+    /* Rename the folder first to avoid partial updates. */
+    if (rename(sc->path, new_folder_path) != 0) {
+        ap_log("rename_shortcut: folder rename failed: %s", strerror(errno));
+        return -1;
+    }
+
+    /* Rename .m3u file inside the (now renamed) folder. */
     char old_m3u[SC_MAX_PATH * 2], new_m3u[SC_MAX_PATH * 2];
     if (join_path_with_suffix(old_m3u, sizeof(old_m3u),
-                               sc->path, sc->name, ".m3u") &&
+                               new_folder_path, sc->name, ".m3u") &&
         join_path_with_suffix(new_m3u, sizeof(new_m3u),
-                               sc->path, new_folder_name, ".m3u")) {
+                               new_folder_path, new_folder_name, ".m3u")) {
         if (rename(old_m3u, new_m3u) != 0)
             ap_log("rename_shortcut: m3u rename failed: %s", strerror(errno));
     }
 
     /* Update .shortcut marker with new display name. */
-    if (write_shortcut_marker(sc->path, new_display) != 0)
+    if (write_shortcut_marker(new_folder_path, new_display) != 0)
         ap_log("rename_shortcut: marker update failed");
-
-    /* Rename the folder itself. */
-    if (rename(sc->path, new_folder_path) != 0) {
-        ap_log("rename_shortcut: folder rename failed: %s", strerror(errno));
-        return -1;
-    }
 
     ap_log("rename_shortcut: done -> %s", new_folder_path);
     return 0;
