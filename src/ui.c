@@ -129,10 +129,14 @@ static bool pick_console(console_dir *out)
     console_dir *consoles = NULL;
     int count = 0;
 
-    if (scan_console_dirs(settings.show_hidden, &consoles, &count) != 0 ||
-        count == 0) {
-        show_error(count == 0 ? "No ROM folders found."
-                              : "Could not read ROM folders.");
+    int scan_rc = scan_console_dirs(settings.show_hidden, &consoles, &count);
+    if (scan_rc != 0) {
+        show_error("Could not read ROM folders.");
+        free(consoles);
+        return false;
+    }
+    if (count == 0) {
+        show_error("No ROM folders found.");
         free(consoles);
         return false;
     }
@@ -190,11 +194,16 @@ static bool pick_rom(const console_dir *console, rom_file *out)
     rom_file *roms = NULL;
     int count = 0;
 
-    if (scan_roms(console->path, settings.show_hidden, &roms, &count) != 0 ||
-        count == 0) {
+    int scan_rc = scan_roms(console->path, settings.show_hidden, &roms, &count);
+    if (scan_rc != 0) {
+        show_error("Could not read ROMs.");
+        free(roms);
+        return false;
+    }
+    if (count == 0) {
         char msg[SC_MAX_DISPLAY + 32];
         snprintf(msg, sizeof(msg), "No ROMs found in %s.", console->display);
-        show_error(count == 0 ? msg : "Could not read ROMs.");
+        show_error(msg);
         free(roms);
         return false;
     }
@@ -276,10 +285,14 @@ static bool pick_tool(tool_pak *out)
     tool_pak *tools = NULL;
     int count = 0;
 
-    if (scan_tools(settings.show_hidden, &tools, &count) != 0 ||
-        count == 0) {
-        show_error(count == 0 ? "No tools found."
-                              : "Could not read Tools folder.");
+    int scan_rc = scan_tools(settings.show_hidden, &tools, &count);
+    if (scan_rc != 0) {
+        show_error("Could not read Tools folder.");
+        free(tools);
+        return false;
+    }
+    if (count == 0) {
+        show_error("No tools found.");
         free(tools);
         return false;
     }
@@ -644,9 +657,14 @@ void manage_shortcuts_flow(void)
     for (;;) {
         shortcut_entry *shortcuts = NULL;
         int count = 0;
-        if (scan_shortcuts(&shortcuts, &count) != 0 || count == 0) {
-            show_error(count == 0 ? "No shortcuts found.\n\nCreate one first!"
-                                  : "Could not read shortcuts.");
+        int scan_rc = scan_shortcuts(&shortcuts, &count);
+        if (scan_rc != 0) {
+            show_error("Could not read shortcuts.");
+            free(shortcuts);
+            return;
+        }
+        if (count == 0) {
+            show_error("No shortcuts found.\n\nCreate one first!");
             free(shortcuts);
             return;
         }

@@ -12,6 +12,7 @@
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -28,10 +29,10 @@ static void thumbnail_fit(int srcW, int srcH, int maxW, int maxH,
         return;
     }
     *outW = maxW;
-    *outH = srcH * maxW / srcW;
+    *outH = (int)((int64_t)srcH * maxW / srcW);
     if (*outH > maxH) {
         *outH = maxH;
-        *outW = srcW * maxH / srcH;
+        *outW = (int)((int64_t)srcW * maxH / srcH);
     }
 }
 

@@ -407,7 +407,9 @@ static bool dir_has_rom_candidate_content_internal(const char *path,
         copy_entry_base_name(name, base_name, sizeof(base_name));
         if (!join_path(full, sizeof(full), path, name))
             continue;
-        if (stat(full, &st) != 0)
+        if (lstat(full, &st) != 0)
+            continue;
+        if (S_ISLNK(st.st_mode))
             continue;
 
         if (S_ISDIR(st.st_mode)) {
@@ -938,7 +940,8 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
 
         if (!join_path(full, sizeof(full), dir_path, name))
             continue;
-        if (stat(full, &st) != 0) continue;
+        if (lstat(full, &st) != 0) continue;
+        if (S_ISLNK(st.st_mode)) continue;
 
         if (S_ISDIR(st.st_mode)) {
             if (is_multi_disc_dir(full, base_name)) {
@@ -1253,10 +1256,10 @@ int create_rom_shortcut(const char *display_name, const char *tag,
     char rel_path[SC_MAX_PATH];
     if (rom->is_multi_disc) {
         snprintf(rel_path, sizeof(rel_path), "../%s/%s.m3u",
-                 rel_from_roms, rom->name);
+                 rel_from_roms, rom->display);
     } else if (rom->is_cue_folder) {
         snprintf(rel_path, sizeof(rel_path), "../%s/%s.cue",
-                 rel_from_roms, rom->name);
+                 rel_from_roms, rom->display);
     } else {
         snprintf(rel_path, sizeof(rel_path), "../%s", rel_from_roms);
     }
