@@ -259,12 +259,42 @@ static bool is_always_hidden_system_entry(const char *name)
     if (!name || name[0] == '\0') return false;
 
     return strcmp(name, "map.txt") == 0 ||
+           strcmp(name, ".media") == 0 ||
            strcmp(name, ".DS_Store") == 0 ||
            strcmp(name, ".Spotlight-V100") == 0 ||
            strcmp(name, ".Trashes") == 0 ||
            strcmp(name, ".fseventsd") == 0 ||
            strcmp(name, ".TemporaryItems") == 0 ||
            starts_with(name, "._");
+}
+
+/* Extensions that are never ROM files — artwork, metadata, save data. */
+static bool is_non_game_extension(const char *name)
+{
+    const char *dot = strrchr(name, '.');
+    if (!dot || dot == name) return false;
+    const char *ext = dot + 1;
+
+    /* Images */
+    if (strcasecmp(ext, "png") == 0 || strcasecmp(ext, "jpg") == 0 ||
+        strcasecmp(ext, "jpeg") == 0 || strcasecmp(ext, "bmp") == 0 ||
+        strcasecmp(ext, "gif") == 0 || strcasecmp(ext, "svg") == 0 ||
+        strcasecmp(ext, "ico") == 0 || strcasecmp(ext, "webp") == 0)
+        return true;
+
+    /* Text / metadata */
+    if (strcasecmp(ext, "txt") == 0 || strcasecmp(ext, "xml") == 0 ||
+        strcasecmp(ext, "nfo") == 0 || strcasecmp(ext, "htm") == 0 ||
+        strcasecmp(ext, "html") == 0 || strcasecmp(ext, "log") == 0 ||
+        strcasecmp(ext, "cfg") == 0 || strcasecmp(ext, "ini") == 0)
+        return true;
+
+    /* Save data */
+    if (strcasecmp(ext, "srm") == 0 || strcasecmp(ext, "sav") == 0 ||
+        strcasecmp(ext, "oops") == 0 || strcasecmp(ext, "db") == 0)
+        return true;
+
+    return false;
 }
 
 bool is_shortcut_folder(const char *folder_path)
@@ -836,7 +866,8 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
             continue;
         }
 
-        /* Regular file. */
+        /* Regular file — skip known non-game extensions. */
+        if (is_non_game_extension(name)) continue;
         *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
         if (*n >= *cap) { closedir(d); return -1; }
         rom_file *r = &(*arr)[(*n)++];

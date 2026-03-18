@@ -236,9 +236,9 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
         return;
     }
 
-    /* Read the .m3u inside the shortcut folder to find the console directory.
-     * relPath is "../Console Dir (TAG)/game.rom" — second component is the
-     * console dir. */
+    /* Read the .m3u inside the shortcut folder to find the ROM's parent dir.
+     * relPath is "../Console Dir (TAG)/[subfolder/.../]game.ext" — we need
+     * everything up to the last '/' to locate the .media folder. */
     char m3u_path[SC_MAX_PATH + SC_MAX_NAME + 8];
     snprintf(m3u_path, sizeof(m3u_path), "%s/%s.m3u", sc->path, sc->name);
     char *data = read_text_file(m3u_path);
@@ -250,24 +250,25 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
                         data[len-1] == ' '))
         data[--len] = '\0';
 
-    /* Parse: "../ConsoleDirName/game.ext" */
+    /* Parse: "../ConsoleDirName/[subfolder/.../]game.ext" */
     if (strncmp(data, "../", 3) != 0) { free(data); return; }
 
     const char *after = data + 3;
-    const char *slash = strchr(after, '/');
-    if (!slash) { free(data); return; }
+    const char *last_slash = strrchr(after, '/');
+    if (!last_slash) { free(data); return; }
 
-    char console_dir_name[SC_MAX_NAME];
-    int clen = (int)(slash - after);
-    if (clen >= (int)sizeof(console_dir_name)) clen = sizeof(console_dir_name) - 1;
-    memcpy(console_dir_name, after, clen);
-    console_dir_name[clen] = '\0';
+    /* rom_parent_rel = console dir + optional subfolders */
+    char rom_parent_rel[SC_MAX_PATH];
+    int plen = (int)(last_slash - after);
+    if (plen >= (int)sizeof(rom_parent_rel)) plen = sizeof(rom_parent_rel) - 1;
+    memcpy(rom_parent_rel, after, plen);
+    rom_parent_rel[plen] = '\0';
     free(data);
 
     char roms_dir[SC_MAX_PATH];
     get_roms_path(roms_dir, sizeof(roms_dir));
     snprintf(out, out_size, "%s/%s/.media/%s.png",
-             roms_dir, console_dir_name, sc->display);
+             roms_dir, rom_parent_rel, sc->display);
 }
 
 /* ── Bulk operations ──────────────────────────────────────────── */

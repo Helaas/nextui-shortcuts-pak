@@ -561,13 +561,27 @@ static detail_action show_shortcut_detail(const shortcut_entry *sc)
 {
     const char *kind = sc->is_tool ? "Tool" : "ROM";
 
+    /* Insert spaces after '/' so the word-wrapper can break long paths. */
+    char wrappable_path[SC_MAX_PATH * 2];
+    wrappable_path[0] = '\0';
+    if (sc->target_path[0] != '\0') {
+        char *dst = wrappable_path;
+        char *end = wrappable_path + sizeof(wrappable_path) - 1;
+        for (const char *s = sc->target_path; *s && dst < end; s++) {
+            *dst++ = *s;
+            if (*s == '/' && *(s + 1) && dst < end)
+                *dst++ = ' ';
+        }
+        *dst = '\0';
+    }
+
     ap_detail_info_pair pairs[4];
     int pair_count = 0;
     pairs[pair_count++] = (ap_detail_info_pair){ .key = "Name",  .value = sc->display };
     pairs[pair_count++] = (ap_detail_info_pair){ .key = "Type",  .value = kind };
     pairs[pair_count++] = (ap_detail_info_pair){ .key = "Tag",   .value = sc->tag };
     if (sc->target_path[0] != '\0')
-        pairs[pair_count++] = (ap_detail_info_pair){ .key = "Target", .value = sc->target_path };
+        pairs[pair_count++] = (ap_detail_info_pair){ .key = "Target", .value = wrappable_path };
 
     ap_detail_section sections[] = {
         {
@@ -590,7 +604,7 @@ static detail_action show_shortcut_detail(const shortcut_entry *sc)
         .footer = footer,
         .footer_count = 2,
         .center_title = true,
-        .body_font = ap_get_font(AP_FONT_MEDIUM),
+        .body_font = ap_get_font(AP_FONT_SMALL),
     };
 
     ap_detail_result result = {0};
