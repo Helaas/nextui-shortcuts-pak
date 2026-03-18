@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 /* ── Helpers ──────────────────────────────────────────────────── */
 
@@ -200,12 +201,12 @@ void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
     }
 
     /* Save composite to .media/bg.png. */
-    char media_dir[SC_MAX_PATH];
+    char media_dir[SC_MAX_PATH * 2];
     snprintf(media_dir, sizeof(media_dir), "%s/.media", dest_folder);
     step_ms = SDL_GetTicks();
     ensure_dir_exists(media_dir);
 
-    char out_path[SC_MAX_PATH * 2];
+    char out_path[SC_MAX_PATH * 2 + sizeof("/bg.png")];
     snprintf(out_path, sizeof(out_path), "%s/bg.png", media_dir);
     int save_rc = IMG_SavePNG(canvas, out_path);
     save_ms = elapsed_ms(step_ms);

@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -460,10 +461,10 @@ char *read_text_file(const char *path)
 {
     FILE *f = fopen(path, "r");
     if (!f) return NULL;
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return NULL; }
     long len = ftell(f);
-    fseek(f, 0, SEEK_SET);
     if (len < 0) { fclose(f); return NULL; }
+    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return NULL; }
     char *buf = malloc(len + 1);
     if (!buf) { fclose(f); return NULL; }
     size_t n = fread(buf, 1, len, f);
@@ -476,8 +477,12 @@ int write_text_file(const char *path, const char *content)
 {
     FILE *f = fopen(path, "w");
     if (!f) return -1;
-    fputs(content, f);
-    fclose(f);
+    if (fputs(content, f) == EOF) {
+        fclose(f);
+        return -1;
+    }
+    if (fclose(f) != 0)
+        return -1;
     return 0;
 }
 
@@ -1238,7 +1243,13 @@ int create_rom_shortcut(const char *display_name, const char *tag,
      * rom->path starts with roms_dir, so the relative portion is
      * rom->path + strlen(roms_dir) + 1.
      */
-    const char *rel_from_roms = rom->path + strlen(roms_dir) + 1;
+    size_t roms_dir_len = strlen(roms_dir);
+    if (strncmp(rom->path, roms_dir, roms_dir_len) != 0 ||
+        rom->path[roms_dir_len] != '/') {
+        ap_log("create_rom_shortcut: rom path does not start with roms dir");
+        return -1;
+    }
+    const char *rel_from_roms = rom->path + roms_dir_len + 1;
     char rel_path[SC_MAX_PATH];
     if (rom->is_multi_disc) {
         snprintf(rel_path, sizeof(rel_path), "../%s/%s.m3u",
@@ -1480,8 +1491,15 @@ void ensure_bridge_emu(void)
         ap_log("ensure_bridge_emu: failed to write %s", launch_path);
         return;
     }
-    fputs(bridge_launch_script, f);
-    fclose(f);
+    if (fputs(bridge_launch_script, f) == EOF) {
+        ap_log("ensure_bridge_emu: fputs failed for %s", launch_path);
+        fclose(f);
+        return;
+    }
+    if (fclose(f) != 0) {
+        ap_log("ensure_bridge_emu: fclose failed for %s", launch_path);
+        return;
+    }
     if (chmod(launch_path, 0755) != 0)
         ap_log("ensure_bridge_emu: chmod failed for %s", launch_path);
 

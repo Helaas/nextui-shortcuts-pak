@@ -23,7 +23,7 @@ static void show_error(const char *message)
         .footer_count = 1,
     };
     ap_confirm_result result;
-    ap_confirmation(&opts, &result);
+    (void)ap_confirmation(&opts, &result);
 }
 
 static void show_info(const char *message)
@@ -37,7 +37,7 @@ static void show_info(const char *message)
         .footer_count = 1,
     };
     ap_confirm_result result;
-    ap_confirmation(&opts, &result);
+    (void)ap_confirmation(&opts, &result);
 }
 
 static bool show_confirm(const char *message, const char *confirm_label)
@@ -221,7 +221,8 @@ static bool pick_rom(const console_dir *console, rom_file *out)
         if (last_slash) *last_slash = '\0';
 
         if (strlen(rom_parent) > console_len &&
-            strncmp(rom_parent, console->path, console_len) == 0) {
+            strncmp(rom_parent, console->path, console_len) == 0 &&
+            rom_parent[console_len] == '/') {
             /* ROM is in a subfolder — show relative subfolder path. */
             const char *sub = rom_parent + console_len + 1;
             snprintf(text, sizeof(text), "%s / %s", sub, roms[i].display);
