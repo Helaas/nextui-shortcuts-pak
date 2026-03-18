@@ -260,6 +260,7 @@ static bool is_always_hidden_system_entry(const char *name)
 
     return strcmp(name, "map.txt") == 0 ||
            strcmp(name, ".media") == 0 ||
+           strcmp(name, ".ports") == 0 ||
            strcmp(name, ".DS_Store") == 0 ||
            strcmp(name, ".Spotlight-V100") == 0 ||
            strcmp(name, ".Trashes") == 0 ||
@@ -1374,6 +1375,63 @@ bool shortcut_exists(const char *display_name, const char *tag)
         if (stat(full, &st) == 0) return true;
     }
     return false;
+}
+
+/* ── Shortcut rename ──────────────────────────────────────────── */
+
+static sc_position detect_position(const char *folder_name)
+{
+    if (starts_with(folder_name, SHORTCUT_PREFIX)) return SC_POS_BOTTOM;
+    if (starts_with(folder_name, TOP_PREFIX))      return SC_POS_TOP;
+    if (starts_with(folder_name, LEGACY_PREFIX))   return SC_POS_BOTTOM;
+    return SC_POS_ALPHA;
+}
+
+int rename_shortcut(const shortcut_entry *sc, const char *new_display)
+{
+    ap_log("rename_shortcut: old=%s new=%s", sc->display, new_display);
+
+    sc_position pos = detect_position(sc->name);
+
+    char new_folder_name[SC_MAX_NAME];
+    if (!build_folder_name(pos, new_display, sc->tag,
+                           new_folder_name, sizeof(new_folder_name)))
+        return -1;
+
+    char roms_dir[SC_MAX_PATH];
+    get_roms_path(roms_dir, sizeof(roms_dir));
+
+    char new_folder_path[SC_MAX_PATH * 2];
+    if (!join_path(new_folder_path, sizeof(new_folder_path),
+                   roms_dir, new_folder_name))
+        return -1;
+
+    /* Check for collision. */
+    struct stat st;
+    if (stat(new_folder_path, &st) == 0) return -1;
+
+    /* Rename .m3u file inside the folder (content unchanged). */
+    char old_m3u[SC_MAX_PATH * 2], new_m3u[SC_MAX_PATH * 2];
+    if (join_path_with_suffix(old_m3u, sizeof(old_m3u),
+                               sc->path, sc->name, ".m3u") &&
+        join_path_with_suffix(new_m3u, sizeof(new_m3u),
+                               sc->path, new_folder_name, ".m3u")) {
+        if (rename(old_m3u, new_m3u) != 0)
+            ap_log("rename_shortcut: m3u rename failed: %s", strerror(errno));
+    }
+
+    /* Update .shortcut marker with new display name. */
+    if (write_shortcut_marker(sc->path, new_display) != 0)
+        ap_log("rename_shortcut: marker update failed");
+
+    /* Rename the folder itself. */
+    if (rename(sc->path, new_folder_path) != 0) {
+        ap_log("rename_shortcut: folder rename failed: %s", strerror(errno));
+        return -1;
+    }
+
+    ap_log("rename_shortcut: done -> %s", new_folder_path);
+    return 0;
 }
 
 /* ── Bridge emulator ──────────────────────────────────────────── */

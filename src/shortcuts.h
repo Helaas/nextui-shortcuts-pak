@@ -107,6 +107,7 @@ typedef enum {
 typedef enum {
     DETAIL_ACTION_BACK = 0,
     DETAIL_ACTION_DELETED,
+    DETAIL_ACTION_RENAMED,
 } detail_action;
 
 /* ── Globals (defined in main.c) ──────────────────────────────── */
@@ -163,6 +164,7 @@ int create_rom_shortcut(const char *display_name, const char *tag,
 int create_tool_shortcut(const char *display_name, const char *pak_path,
                          sc_position pos, const app_settings *settings);
 int remove_shortcut(const char *shortcut_path);
+int rename_shortcut(const shortcut_entry *sc, const char *new_display);
 bool shortcut_exists(const char *display_name, const char *tag);
 
 /* ── device.c — Bridge emu ────────────────────────────────────── */

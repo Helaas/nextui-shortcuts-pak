@@ -435,6 +435,67 @@ cleanup:
     return ok;
 }
 
+static bool test_ports_dotports_always_hidden(void)
+{
+    test_env env = {0};
+    console_dir *consoles = NULL;
+    rom_file *roms = NULL;
+    int count = 0;
+    bool ok = false;
+    const console_dir *ports = NULL;
+
+    CHECK(setup_test_env(&env), "setup failed");
+
+    /* Top-level launch scripts (the actual ROM entries). */
+    CHECK(make_dir_recursive("mock_sdcard/Roms/Ports (PORTS)"),
+          "mkdir ports console failed");
+    CHECK(touch_file("mock_sdcard/Roms/Ports (PORTS)/0) Portmaster.sh"),
+          "create portmaster failed");
+    CHECK(touch_file("mock_sdcard/Roms/Ports (PORTS)/PokeMMO.sh"),
+          "create pokemmo launcher failed");
+
+    /* .ports internal data — should never appear regardless of show_hidden. */
+    CHECK(make_dir_recursive("mock_sdcard/Roms/Ports (PORTS)/.ports/pokemmo/src/com"),
+          "mkdir ports data tree failed");
+    CHECK(make_dir_recursive("mock_sdcard/Roms/Ports (PORTS)/.ports/pokemmo/roms"),
+          "mkdir ports roms dir failed");
+    CHECK(touch_file("mock_sdcard/Roms/Ports (PORTS)/.ports/PokeMMO.sh"),
+          "create ports internal sh failed");
+    CHECK(touch_file("mock_sdcard/Roms/Ports (PORTS)/.ports/pokemmo/port.json"),
+          "create port.json failed");
+    CHECK(touch_file("mock_sdcard/Roms/Ports (PORTS)/.ports/pokemmo/RELEASE"),
+          "create RELEASE failed");
+    CHECK(touch_file("mock_sdcard/Roms/Ports (PORTS)/.ports/pokemmo/src/HO.java"),
+          "create java source failed");
+    CHECK(touch_file("mock_sdcard/Roms/Ports (PORTS)/.ports/pokemmo/src/com/Foo.class"),
+          "create class file failed");
+    CHECK(touch_file("mock_sdcard/Roms/Ports (PORTS)/.ports/pokemmo/roms/.gitkeep"),
+          "create gitkeep failed");
+
+    CHECK(scan_console_dirs(false, &consoles, &count) == 0,
+          "scan_console_dirs(false) failed");
+    ports = find_console_by_name(consoles, count, "Ports (PORTS)");
+    CHECK(ports != NULL, "ports console should be visible");
+
+    /* With show_hidden=true, .ports must still be excluded. */
+    CHECK(scan_roms(ports->path, true, &roms, &count) == 0,
+          "scan_roms(true) failed");
+    CHECK(count == 2,
+          "expected 2 top-level launch scripts, got %d", count);
+    CHECK(find_rom_by_display(roms, count, "0) Portmaster") != NULL,
+          "missing Portmaster entry");
+    CHECK(find_rom_by_display(roms, count, "PokeMMO") != NULL,
+          "missing PokeMMO entry");
+
+    ok = true;
+
+cleanup:
+    free(roms);
+    free(consoles);
+    teardown_test_env(&env);
+    return ok;
+}
+
 int main(void)
 {
     static const test_case tests[] = {
@@ -444,6 +505,7 @@ int main(void)
         { "empty console does not qualify", test_empty_console_does_not_qualify },
         { "multidisc and cue folders survive", test_multidisc_and_cue_folders_survive },
         { "show_hidden reveals hidden roms not sidecars", test_show_hidden_reveals_hidden_roms_not_sidecars },
+        { "ports .ports dir always hidden", test_ports_dotports_always_hidden },
     };
     int failures = 0;
 

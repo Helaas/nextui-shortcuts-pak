@@ -53,7 +53,7 @@ Browse installed Tools (`.pak` directories), pick one, choose a sort position, a
 
 ### Manage Shortcuts
 
-Browse all existing shortcuts. Select one to view details (name, type, tag, target path) and optionally delete it.
+Browse all existing shortcuts. Press **A** to view details and delete, or **Y** to rename a shortcut using the on-screen keyboard.
 
 ### Manage Artwork
 

@@ -668,12 +668,14 @@ void manage_shortcuts_flow(void)
         ap_footer_item footer[] = {
             { .button = AP_BTN_B, .label = "Back" },
             { .button = AP_BTN_A, .label = "Details", .is_confirm = true },
+            { .button = AP_BTN_Y, .label = "Rename" },
         };
 
         ap_list_opts opts = ap_list_default_opts("Manage Shortcuts",
                                                   items, count);
         opts.footer = footer;
-        opts.footer_count = 2;
+        opts.footer_count = 3;
+        opts.secondary_action_button = AP_BTN_Y;
 
         ap_list_result result = {0};
         int rc = ap_list(&opts, &result);
@@ -687,17 +689,52 @@ void manage_shortcuts_flow(void)
         }
 
         int idx = result.selected_index;
-        ap_log("ui: manage shortcuts -> selected index=%d name=%s",
-               idx, shortcuts[idx].display);
+        ap_log("ui: manage shortcuts -> selected index=%d name=%s action=%d",
+               idx, shortcuts[idx].display, result.action);
 
-        detail_action action = show_shortcut_detail(&shortcuts[idx]);
+        detail_action action = DETAIL_ACTION_BACK;
+
+        if (result.action == AP_ACTION_SECONDARY_TRIGGERED) {
+            /* Y pressed — rename shortcut. */
+            ap_keyboard_result kb = {0};
+            int kb_rc = ap_keyboard(shortcuts[idx].display,
+                                    "Rename shortcut",
+                                    AP_KB_GENERAL, &kb);
+            if (kb_rc == AP_OK && kb.text[0] != '\0' &&
+                strcmp(kb.text, shortcuts[idx].display) != 0) {
+
+                /* Truncate to display-name limit before using. */
+                char new_name[SC_MAX_DISPLAY];
+                size_t kb_len = strlen(kb.text);
+                if (kb_len >= sizeof(new_name))
+                    kb_len = sizeof(new_name) - 1;
+                memcpy(new_name, kb.text, kb_len);
+                new_name[kb_len] = '\0';
+
+                if (shortcut_exists(new_name, shortcuts[idx].tag)) {
+                    char msg[SC_MAX_DISPLAY + 64];
+                    snprintf(msg, sizeof(msg),
+                             "A shortcut named \"%s\" already exists.",
+                             new_name);
+                    show_error(msg);
+                } else if (rename_shortcut(&shortcuts[idx], new_name) != 0) {
+                    show_error("Could not rename shortcut.");
+                } else {
+                    show_info("Shortcut renamed.");
+                    action = DETAIL_ACTION_RENAMED;
+                }
+            }
+        } else {
+            action = show_shortcut_detail(&shortcuts[idx]);
+        }
 
         free(items);
         free(labels);
         free(shortcuts);
 
-        /* Refresh list after detail view (whether deleted or went back). */
-        if (action == DETAIL_ACTION_DELETED || action == DETAIL_ACTION_BACK)
+        /* Refresh list after any action. */
+        if (action == DETAIL_ACTION_DELETED || action == DETAIL_ACTION_BACK ||
+            action == DETAIL_ACTION_RENAMED)
             continue;
     }
 }

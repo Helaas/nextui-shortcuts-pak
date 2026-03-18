@@ -230,15 +230,27 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
     out[0] = '\0';
 
     if (sc->is_tool) {
+        /* Derive tool name from target path (e.g. ".../Retroarch.pak" → "Retroarch")
+         * so artwork lookup works even if the shortcut was renamed. */
         char tools_dir[SC_MAX_PATH];
         get_tools_path(tools_dir, sizeof(tools_dir));
-        snprintf(out, out_size, "%s/.media/%s.png", tools_dir, sc->display);
+
+        const char *art_name = sc->display;
+        char tool_name[SC_MAX_DISPLAY];
+        if (sc->target_path[0] != '\0') {
+            const char *base = strrchr(sc->target_path, '/');
+            base = base ? base + 1 : sc->target_path;
+            strip_extension(base, tool_name, sizeof(tool_name));
+            art_name = tool_name;
+        }
+        snprintf(out, out_size, "%s/.media/%s.png", tools_dir, art_name);
         return;
     }
 
     /* Read the .m3u inside the shortcut folder to find the ROM's parent dir.
      * relPath is "../Console Dir (TAG)/[subfolder/.../]game.ext" — we need
-     * everything up to the last '/' to locate the .media folder. */
+     * everything up to the last '/' to locate the .media folder, and the
+     * ROM filename to derive the artwork name (works even if renamed). */
     char m3u_path[SC_MAX_PATH + SC_MAX_NAME + 8];
     snprintf(m3u_path, sizeof(m3u_path), "%s/%s.m3u", sc->path, sc->name);
     char *data = read_text_file(m3u_path);
@@ -263,12 +275,18 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
     if (plen >= (int)sizeof(rom_parent_rel)) plen = sizeof(rom_parent_rel) - 1;
     memcpy(rom_parent_rel, after, plen);
     rom_parent_rel[plen] = '\0';
+
+    /* Derive artwork name from the ROM filename, not the shortcut display
+     * name, so that artwork regeneration works for renamed shortcuts. */
+    const char *rom_filename = last_slash + 1;
+    char rom_display[SC_MAX_DISPLAY];
+    strip_extension(rom_filename, rom_display, sizeof(rom_display));
     free(data);
 
     char roms_dir[SC_MAX_PATH];
     get_roms_path(roms_dir, sizeof(roms_dir));
     snprintf(out, out_size, "%s/%s/.media/%s.png",
-             roms_dir, rom_parent_rel, sc->display);
+             roms_dir, rom_parent_rel, rom_display);
 }
 
 /* ── Bulk operations ──────────────────────────────────────────── */
