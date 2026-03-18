@@ -78,7 +78,7 @@ main_action show_main_menu(void)
 
     ap_list_result result = {0};
     int rc = ap_list(&opts, &result);
-    if (rc == AP_CANCELLED || rc != AP_OK)
+    if (rc != AP_OK)
         return MAIN_ACTION_QUIT;
 
     switch (result.selected_index) {
@@ -451,8 +451,11 @@ void add_rom_shortcut_flow(void)
     if (!pick_position(&pos)) return;
 
     char folder_name[SC_MAX_NAME];
-    build_folder_name(pos, display_name, console.tag,
-                      folder_name, sizeof(folder_name));
+    if (!build_folder_name(pos, display_name, console.tag,
+                           folder_name, sizeof(folder_name))) {
+        show_error("Folder name too long.");
+        return;
+    }
 
     /* Confirmation message. */
     char rom_desc[SC_MAX_NAME + 32];
@@ -512,8 +515,11 @@ void add_tool_shortcut_flow(void)
     if (!pick_position(&pos)) return;
 
     char folder_name[SC_MAX_NAME];
-    build_folder_name(pos, display_name, BRIDGE_EMU_TAG,
-                      folder_name, sizeof(folder_name));
+    if (!build_folder_name(pos, display_name, BRIDGE_EMU_TAG,
+                           folder_name, sizeof(folder_name))) {
+        show_error("Folder name too long.");
+        return;
+    }
 
     char msg[2048];
     snprintf(msg, sizeof(msg),

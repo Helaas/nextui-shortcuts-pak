@@ -120,7 +120,7 @@ bool ends_with(const char *str, const char *suffix);
 void extract_tag(const char *name, char *out, int out_size);
 void extract_display_name(const char *name, char *out, int out_size);
 void strip_extension(const char *name, char *out, int out_size);
-void build_folder_name(sc_position pos, const char *display, const char *tag,
+bool build_folder_name(sc_position pos, const char *display, const char *tag,
                        char *out, int out_size);
 bool is_hidden(const char *name);
 bool is_mac_dotfile(const char *name);

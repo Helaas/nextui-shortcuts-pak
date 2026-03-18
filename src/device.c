@@ -219,21 +219,24 @@ void strip_extension(const char *name, char *out, int out_size)
     copy_cstr_trunc(out, (size_t)out_size, name);
 }
 
-/* build_folder_name: construct prefixed shortcut folder name. */
-void build_folder_name(sc_position pos, const char *display, const char *tag,
+/* build_folder_name: construct prefixed shortcut folder name.
+ * Returns false if the result was truncated. */
+bool build_folder_name(sc_position pos, const char *display, const char *tag,
                        char *out, int out_size)
 {
+    int n;
     switch (pos) {
     case SC_POS_TOP:
-        snprintf(out, out_size, TOP_PREFIX "%s (%s)", display, tag);
+        n = snprintf(out, out_size, TOP_PREFIX "%s (%s)", display, tag);
         break;
     case SC_POS_ALPHA:
-        snprintf(out, out_size, "%s (%s)", display, tag);
+        n = snprintf(out, out_size, "%s (%s)", display, tag);
         break;
     default: /* SC_POS_BOTTOM */
-        snprintf(out, out_size, SHORTCUT_PREFIX "%s (%s)", display, tag);
+        n = snprintf(out, out_size, SHORTCUT_PREFIX "%s (%s)", display, tag);
         break;
     }
+    return n >= 0 && n < out_size;
 }
 
 bool is_hidden(const char *name)
@@ -658,8 +661,9 @@ static void *grow_array(void *arr, int *cap, int count, size_t elem_size)
 {
     if (count < *cap) return arr;
     int new_cap = *cap == 0 ? 64 : *cap * 2;
-    void *new_arr = realloc(arr, new_cap * elem_size);
-    if (new_arr) *cap = new_cap;
+    void *new_arr = realloc(arr, (size_t)new_cap * elem_size);
+    if (!new_arr) return arr; /* keep old allocation so caller can free */
+    *cap = new_cap;
     return new_arr;
 }
 
@@ -714,7 +718,7 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
         if (tag[0] == '\0') continue; /* no emu tag — skip */
 
         arr = grow_array(arr, &cap, n, sizeof(console_dir));
-        if (!arr) { closedir(d); *out = NULL; *count = 0; return -1; }
+        if (n >= cap) { closedir(d); free(arr); *out = NULL; *count = 0; return -1; }
 
         console_dir *c = &arr[n];
         memset(c, 0, sizeof(*c));
@@ -776,7 +780,7 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
             struct stat m3u_st;
             if (stat(check, &m3u_st) == 0) {
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
-                if (!*arr) { closedir(d); return -1; }
+                if (*n >= *cap) { closedir(d); free(*arr); *arr = NULL; return -1; }
                 rom_file *r = &(*arr)[(*n)++];
                 memset(r, 0, sizeof(*r));
                 snprintf(r->name, sizeof(r->name), "%s", name);
@@ -791,7 +795,7 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
             snprintf(check, sizeof(check), "%s/%s.cue", full, base_name);
             if (stat(check, &m3u_st) == 0) {
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
-                if (!*arr) { closedir(d); return -1; }
+                if (*n >= *cap) { closedir(d); free(*arr); *arr = NULL; return -1; }
                 rom_file *r = &(*arr)[(*n)++];
                 memset(r, 0, sizeof(*r));
                 snprintf(r->name, sizeof(r->name), "%s", name);
@@ -809,7 +813,7 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
 
         /* Regular file. */
         *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
-        if (!*arr) { closedir(d); return -1; }
+        if (*n >= *cap) { closedir(d); free(*arr); *arr = NULL; return -1; }
         rom_file *r = &(*arr)[(*n)++];
         memset(r, 0, sizeof(*r));
         snprintf(r->name, sizeof(r->name), "%s", name);
@@ -889,7 +893,7 @@ int scan_tools(bool show_hidden, tool_pak **out, int *count)
         }
 
         arr = grow_array(arr, &cap, n, sizeof(tool_pak));
-        if (!arr) { closedir(d); *out = NULL; *count = 0; return -1; }
+        if (n >= cap) { closedir(d); free(arr); *out = NULL; *count = 0; return -1; }
 
         tool_pak *t = &arr[n];
         memset(t, 0, sizeof(*t));
@@ -1043,7 +1047,8 @@ int create_rom_shortcut(const char *display_name, const char *tag,
     get_roms_path(roms_dir, sizeof(roms_dir));
 
     char folder_name[SC_MAX_NAME];
-    build_folder_name(pos, display_name, tag, folder_name, sizeof(folder_name));
+    if (!build_folder_name(pos, display_name, tag, folder_name, sizeof(folder_name)))
+        return -1;
 
     char folder_path[SC_MAX_PATH * 2];
     if (!join_path(folder_path, sizeof(folder_path), roms_dir, folder_name))
@@ -1081,7 +1086,8 @@ int create_rom_shortcut(const char *display_name, const char *tag,
         return -1;
 
     /* Write .shortcut marker. */
-    write_shortcut_marker(folder_path, display_name);
+    if (write_shortcut_marker(folder_path, display_name) != 0)
+        ap_log("create_rom_shortcut: failed to write shortcut marker");
 
     /* Artwork. */
     if (settings->copy_artwork) {
@@ -1116,8 +1122,9 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
     get_tools_path(tools_dir, sizeof(tools_dir));
 
     char folder_name[SC_MAX_NAME];
-    build_folder_name(pos, display_name, BRIDGE_EMU_TAG,
-                      folder_name, sizeof(folder_name));
+    if (!build_folder_name(pos, display_name, BRIDGE_EMU_TAG,
+                           folder_name, sizeof(folder_name)))
+        return -1;
 
     char folder_path[SC_MAX_PATH * 2];
     if (!join_path(folder_path, sizeof(folder_path), roms_dir, folder_name))
@@ -1145,7 +1152,8 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
         return -1;
 
     /* Write .shortcut marker. */
-    write_shortcut_marker(folder_path, display_name);
+    if (write_shortcut_marker(folder_path, display_name) != 0)
+        ap_log("create_tool_shortcut: failed to write shortcut marker");
 
     /* Artwork. */
     if (settings->copy_artwork) {
@@ -1178,8 +1186,9 @@ bool shortcut_exists(const char *display_name, const char *tag)
     sc_position positions[] = { SC_POS_BOTTOM, SC_POS_TOP, SC_POS_ALPHA };
     for (int i = 0; i < 3; i++) {
         char folder_name[SC_MAX_NAME];
-        build_folder_name(positions[i], display_name, tag,
-                          folder_name, sizeof(folder_name));
+        if (!build_folder_name(positions[i], display_name, tag,
+                               folder_name, sizeof(folder_name)))
+            continue;
         char full[SC_MAX_PATH * 2];
         snprintf(full, sizeof(full), "%s/%s", roms_dir, folder_name);
         struct stat st;
@@ -1236,7 +1245,8 @@ void ensure_bridge_emu(void)
     }
     fputs(bridge_launch_script, f);
     fclose(f);
-    chmod(launch_path, 0755);
+    if (chmod(launch_path, 0755) != 0)
+        ap_log("ensure_bridge_emu: chmod failed for %s", launch_path);
 
     ap_log("ensure_bridge_emu: created at %s", launch_path);
 #endif
