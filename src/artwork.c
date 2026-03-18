@@ -105,7 +105,7 @@ static uint32_t elapsed_ms(uint32_t start_ms)
 /* ── Main compositing function ────────────────────────────────── */
 
 void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
-                         bool use_global_bg, bool force_black)
+                         bool use_global_bg, bool write_when_missing_art)
 {
     uint32_t start_ms = SDL_GetTicks();
     uint32_t art_load_ms = 0;
@@ -124,9 +124,9 @@ void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
                    IMG_GetError(), art_load_ms, elapsed_ms(start_ms));
             return;
         }
-    } else if (!force_black) {
+    } else if (!write_when_missing_art) {
         art_load_ms = elapsed_ms(step_ms);
-        return; /* No art and not forcing — skip. */
+        return; /* No art and this mode skips output when art is missing. */
     } else {
         art_load_ms = elapsed_ms(step_ms);
     }
@@ -301,13 +301,14 @@ int regenerate_all_media(const app_settings *settings)
     if (scan_shortcuts(&shortcuts, &count) != 0)
         return -1;
 
-    bool use_bg, force_blk;
-    artwork_bg_params(settings, &use_bg, &force_blk);
+    bool use_bg, write_when_missing_art;
+    artwork_bg_params(settings, &use_bg, &write_when_missing_art);
 
     for (int i = 0; i < count; i++) {
         char art_src[SC_MAX_PATH];
         shortcut_art_src_path(&shortcuts[i], art_src, sizeof(art_src));
-        generate_artwork_bg(art_src, shortcuts[i].path, use_bg, force_blk);
+        generate_artwork_bg(art_src, shortcuts[i].path, use_bg,
+                            write_when_missing_art);
     }
 
     ap_log("regenerate_all_media: processed %d shortcuts in %ums",

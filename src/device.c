@@ -78,6 +78,24 @@ static bool append_cstr_exact(char *out, size_t out_size, const char *suffix)
     return true;
 }
 
+static bool strip_trailing_suffix(char *str, const char *suffix)
+{
+    size_t str_len;
+    size_t suffix_len;
+
+    if (!str || !suffix) return false;
+
+    str_len = strlen(str);
+    suffix_len = strlen(suffix);
+    if (suffix_len > str_len)
+        return false;
+    if (strcmp(str + str_len - suffix_len, suffix) != 0)
+        return false;
+
+    str[str_len - suffix_len] = '\0';
+    return true;
+}
+
 static bool join_path(char *out, size_t out_size,
                       const char *left, const char *right)
 {
@@ -491,16 +509,34 @@ int write_text_file(const char *path, const char *content)
 int ensure_dir_exists(const char *path)
 {
     char *tmp = path ? strdup(path) : NULL;
+    struct stat st;
     if (!tmp) return -1;
 
     for (char *p = tmp + 1; *p; p++) {
         if (*p == '/') {
             *p = '\0';
-            mkdir(tmp, 0755);
+            if (mkdir(tmp, 0755) != 0) {
+                if (errno != EEXIST ||
+                    lstat(tmp, &st) != 0 ||
+                    !S_ISDIR(st.st_mode)) {
+                    *p = '/';
+                    free(tmp);
+                    return -1;
+                }
+            }
             *p = '/';
         }
     }
-    int rc = (mkdir(tmp, 0755) == 0 || errno == EEXIST) ? 0 : -1;
+    int rc;
+    if (mkdir(tmp, 0755) == 0) {
+        rc = 0;
+    } else if (errno == EEXIST &&
+               lstat(tmp, &st) == 0 &&
+               S_ISDIR(st.st_mode)) {
+        rc = 0;
+    } else {
+        rc = -1;
+    }
     free(tmp);
     return rc;
 }
@@ -698,15 +734,15 @@ int save_settings(const app_settings *s)
 }
 
 void artwork_bg_params(const app_settings *s, bool *use_global_bg,
-                       bool *force_black)
+                       bool *write_when_missing_art)
 {
     switch (s->artwork_mode) {
     case ART_MODE_WALLPAPER:
-        *use_global_bg = true;  *force_black = true;  break;
+        *use_global_bg = true;  *write_when_missing_art = true;  break;
     case ART_MODE_FALLBACK:
-        *use_global_bg = true;  *force_black = false; break;
+        *use_global_bg = true;  *write_when_missing_art = false; break;
     default: /* ART_MODE_BLACK */
-        *use_global_bg = false; *force_black = true;  break;
+        *use_global_bg = false; *write_when_missing_art = true;  break;
     }
 }
 
@@ -869,7 +905,9 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
         if (!join_path(full, sizeof(full), roms_dir, ent->d_name))
             continue;
         struct stat st;
-        if (stat(full, &st) != 0 || !S_ISDIR(st.st_mode))
+        if (lstat(full, &st) != 0 ||
+            S_ISLNK(st.st_mode) ||
+            !S_ISDIR(st.st_mode))
             continue;
 
         if (is_shortcut_folder(full))
@@ -1052,7 +1090,9 @@ int scan_tools(bool show_hidden, tool_pak **out, int *count)
         if (!join_path(full, sizeof(full), tools_dir, name))
             continue;
         struct stat st;
-        if (stat(full, &st) != 0 || !S_ISDIR(st.st_mode))
+        if (lstat(full, &st) != 0 ||
+            S_ISLNK(st.st_mode) ||
+            !S_ISDIR(st.st_mode))
             continue;
 
         if (!show_hidden && is_hidden(name)) continue;
@@ -1065,12 +1105,12 @@ int scan_tools(bool show_hidden, tool_pak **out, int *count)
         copy_cstr_trunc(base_name, sizeof(base_name), name);
         if (disabled) {
             /* Strip .pak.disabled -> base name. */
-            char *dot = strstr(base_name, ".pak.disabled");
-            if (dot) *dot = '\0';
+            if (!strip_trailing_suffix(base_name, ".pak.disabled"))
+                continue;
         } else {
             /* Strip .pak -> base name. */
-            char *dot = strstr(base_name, ".pak");
-            if (dot) *dot = '\0';
+            if (!strip_trailing_suffix(base_name, ".pak"))
+                continue;
         }
 
         arr = grow_array(arr, &cap, n, sizeof(tool_pak));
@@ -1121,7 +1161,9 @@ int scan_shortcuts(shortcut_entry **out, int *count)
         if (!join_path(full, sizeof(full), roms_dir, ent->d_name))
             continue;
         struct stat st;
-        if (stat(full, &st) != 0 || !S_ISDIR(st.st_mode))
+        if (lstat(full, &st) != 0 ||
+            S_ISLNK(st.st_mode) ||
+            !S_ISDIR(st.st_mode))
             continue;
         if (!is_shortcut_folder(full))
             continue;
@@ -1298,9 +1340,10 @@ int create_rom_shortcut(const char *display_name, const char *tag,
             !append_cstr_exact(art_src, sizeof(art_src), ".png"))
             return -1;
 
-        bool use_bg, force_blk;
-        artwork_bg_params(settings, &use_bg, &force_blk);
-        generate_artwork_bg(art_src, folder_path, use_bg, force_blk);
+        bool use_bg, write_when_missing_art;
+        artwork_bg_params(settings, &use_bg, &write_when_missing_art);
+        generate_artwork_bg(art_src, folder_path, use_bg,
+                            write_when_missing_art);
     }
 
     ap_log("create_rom_shortcut: created folder=%s", folder_path);
@@ -1356,9 +1399,10 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
             !append_cstr_exact(art_src, sizeof(art_src), display_name) ||
             !append_cstr_exact(art_src, sizeof(art_src), ".png"))
             return -1;
-        bool use_bg, force_blk;
-        artwork_bg_params(settings, &use_bg, &force_blk);
-        generate_artwork_bg(art_src, folder_path, use_bg, force_blk);
+        bool use_bg, write_when_missing_art;
+        artwork_bg_params(settings, &use_bg, &write_when_missing_art);
+        generate_artwork_bg(art_src, folder_path, use_bg,
+                            write_when_missing_art);
     }
 
     ap_log("create_tool_shortcut: created folder=%s", folder_path);

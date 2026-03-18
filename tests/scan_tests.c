@@ -68,6 +68,29 @@ static bool touch_file(const char *path)
     return write_file(path, "");
 }
 
+static bool path_exists(const char *path)
+{
+    struct stat st;
+    return lstat(path, &st) == 0;
+}
+
+static bool path_is_dir(const char *path)
+{
+    struct stat st;
+    return lstat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static bool file_contents_equal(const char *path, const char *expected)
+{
+    bool ok = false;
+    char *data = read_text_file(path);
+
+    if (!data) return false;
+    ok = strcmp(data, expected) == 0;
+    free(data);
+    return ok;
+}
+
 static bool remove_tree(const char *path)
 {
     struct stat st;
@@ -150,6 +173,17 @@ static const rom_file *find_rom_by_display(const rom_file *roms,
     for (int i = 0; i < count; i++) {
         if (strcmp(roms[i].display, display) == 0)
             return &roms[i];
+    }
+    return NULL;
+}
+
+static const tool_pak *find_tool_by_name(const tool_pak *tools,
+                                         int count,
+                                         const char *name)
+{
+    for (int i = 0; i < count; i++) {
+        if (strcmp(tools[i].name, name) == 0)
+            return &tools[i];
     }
     return NULL;
 }
@@ -496,6 +530,245 @@ cleanup:
     return ok;
 }
 
+static bool test_tool_names_preserve_internal_pak_suffixes(void)
+{
+    test_env env = {0};
+    tool_pak *tools = NULL;
+    int count = 0;
+    bool ok = false;
+    const tool_pak *tool = NULL;
+    const tool_pak *disabled_tool = NULL;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(make_dir_recursive("mock_sdcard/Tools/tg5040/My.pak Helper.pak"),
+          "mkdir tool fixture failed");
+    CHECK(make_dir_recursive("mock_sdcard/Tools/tg5040/Disabled Tool.pak.disabled"),
+          "mkdir disabled tool fixture failed");
+
+    CHECK(scan_tools(false, &tools, &count) == 0,
+          "scan_tools(false) failed");
+    CHECK(count == 1, "expected one visible tool, got %d", count);
+    tool = find_tool_by_name(tools, count, "My.pak Helper");
+    CHECK(tool != NULL, "missing tool with internal .pak in name");
+    CHECK(strcmp(tool->display, "My.pak Helper") == 0,
+          "unexpected visible tool display: %s", tool->display);
+    free(tools);
+    tools = NULL;
+
+    CHECK(scan_tools(true, &tools, &count) == 0,
+          "scan_tools(true) failed");
+    CHECK(count == 2, "expected two tools with show_hidden enabled, got %d",
+          count);
+    disabled_tool = find_tool_by_name(tools, count, "Disabled Tool");
+    CHECK(disabled_tool != NULL, "missing disabled tool");
+    CHECK(strcmp(disabled_tool->display, "Disabled Tool  [disabled]") == 0,
+          "unexpected disabled tool display: %s", disabled_tool->display);
+
+    ok = true;
+
+cleanup:
+    free(tools);
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_symlinked_entries_are_skipped(void)
+{
+    test_env env = {0};
+    console_dir *consoles = NULL;
+    tool_pak *tools = NULL;
+    shortcut_entry *shortcuts = NULL;
+    int count = 0;
+    bool ok = false;
+    char console_target[SC_MAX_PATH];
+    char tool_target[SC_MAX_PATH];
+    char shortcut_target[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(make_dir_recursive("mock_sdcard/Tools/tg5040"),
+          "mkdir tools root failed");
+    CHECK(make_dir_recursive("outside/Linked Console (LNK)"),
+          "mkdir external console failed");
+    CHECK(touch_file("outside/Linked Console (LNK)/Game.zip"),
+          "create external rom failed");
+    CHECK(make_dir_recursive("outside/Linked Tool.pak"),
+          "mkdir external tool failed");
+    CHECK(make_dir_recursive("outside/Linked Shortcut (TAG)"),
+          "mkdir external shortcut failed");
+    CHECK(write_file("outside/Linked Shortcut (TAG)/.shortcut",
+                     "Linked Shortcut"),
+          "write external shortcut marker failed");
+    CHECK(write_file("outside/Linked Shortcut (TAG)/Linked Shortcut (TAG).m3u",
+                     "../Console (TAG)/Game.zip"),
+          "write external shortcut m3u failed");
+
+    CHECK(snprintf(console_target, sizeof(console_target), "%s/outside/Linked Console (LNK)",
+                   env.temp_root) < (int)sizeof(console_target),
+          "console target path too long");
+    CHECK(snprintf(tool_target, sizeof(tool_target), "%s/outside/Linked Tool.pak",
+                   env.temp_root) < (int)sizeof(tool_target),
+          "tool target path too long");
+    CHECK(snprintf(shortcut_target, sizeof(shortcut_target),
+                   "%s/outside/Linked Shortcut (TAG)", env.temp_root) <
+          (int)sizeof(shortcut_target),
+          "shortcut target path too long");
+
+    CHECK(symlink(console_target,
+                  "mock_sdcard/Roms/Linked Console (LNK)") == 0,
+          "create console symlink failed");
+    CHECK(symlink(tool_target,
+                  "mock_sdcard/Tools/tg5040/Linked Tool.pak") == 0,
+          "create tool symlink failed");
+    CHECK(symlink(shortcut_target,
+                  "mock_sdcard/Roms/Linked Shortcut (TAG)") == 0,
+          "create shortcut symlink failed");
+
+    CHECK(scan_console_dirs(false, &consoles, &count) == 0,
+          "scan_console_dirs(false) failed");
+    CHECK(count == 0, "expected symlinked console to be skipped, got %d",
+          count);
+    free(consoles);
+    consoles = NULL;
+
+    CHECK(scan_tools(false, &tools, &count) == 0,
+          "scan_tools(false) failed");
+    CHECK(count == 0, "expected symlinked tool to be skipped, got %d", count);
+    free(tools);
+    tools = NULL;
+
+    CHECK(scan_shortcuts(&shortcuts, &count) == 0,
+          "scan_shortcuts failed");
+    CHECK(count == 0, "expected symlinked shortcut to be skipped, got %d",
+          count);
+
+    ok = true;
+
+cleanup:
+    free(shortcuts);
+    free(tools);
+    free(consoles);
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_ensure_dir_exists_rejects_file_collisions(void)
+{
+    test_env env = {0};
+    bool ok = false;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(write_file("mock_sdcard/Roms/existing-file", "not a directory"),
+          "write final collision file failed");
+    CHECK(write_file("mock_sdcard/blocker", "not a directory"),
+          "write intermediate collision file failed");
+
+    CHECK(ensure_dir_exists("mock_sdcard/Roms/existing-file") != 0,
+          "expected existing file at final path to fail");
+    CHECK(ensure_dir_exists("mock_sdcard/blocker/child") != 0,
+          "expected existing file in parent path to fail");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_rename_shortcut_updates_layout_for_all_positions(void)
+{
+    typedef struct {
+        sc_position pos;
+        const char *label;
+    } rename_case;
+
+    static const rename_case cases[] = {
+        { SC_POS_BOTTOM, "bottom" },
+        { SC_POS_TOP, "top" },
+        { SC_POS_ALPHA, "alpha" },
+    };
+
+    test_env env = {0};
+    bool ok = false;
+
+    CHECK(setup_test_env(&env), "setup failed");
+
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        const char *old_display = "Old Name";
+        const char *new_display = "New Name";
+        const char *tag = "TAG";
+        char old_folder_name[SC_MAX_NAME];
+        char new_folder_name[SC_MAX_NAME];
+        char old_folder_path[SC_MAX_PATH];
+        char new_folder_path[SC_MAX_PATH];
+        char old_m3u_path[SC_MAX_PATH * 2];
+        char new_m3u_path[SC_MAX_PATH * 2];
+        char new_marker_path[SC_MAX_PATH * 2];
+        shortcut_entry sc = {0};
+
+        CHECK(build_folder_name(cases[i].pos, old_display, tag,
+                                old_folder_name, sizeof(old_folder_name)),
+              "build old folder name failed for %s", cases[i].label);
+        CHECK(build_folder_name(cases[i].pos, new_display, tag,
+                                new_folder_name, sizeof(new_folder_name)),
+              "build new folder name failed for %s", cases[i].label);
+        CHECK(snprintf(old_folder_path, sizeof(old_folder_path),
+                       "mock_sdcard/Roms/%s", old_folder_name) <
+              (int)sizeof(old_folder_path),
+              "old folder path too long for %s", cases[i].label);
+        CHECK(snprintf(new_folder_path, sizeof(new_folder_path),
+                       "mock_sdcard/Roms/%s", new_folder_name) <
+              (int)sizeof(new_folder_path),
+              "new folder path too long for %s", cases[i].label);
+        CHECK(make_dir_recursive(old_folder_path),
+              "mkdir shortcut fixture failed for %s", cases[i].label);
+        CHECK(snprintf(old_m3u_path, sizeof(old_m3u_path), "%s/%s.m3u",
+                       old_folder_path, old_folder_name) <
+              (int)sizeof(old_m3u_path),
+              "old m3u path too long for %s", cases[i].label);
+        CHECK(snprintf(new_m3u_path, sizeof(new_m3u_path), "%s/%s.m3u",
+                       new_folder_path, new_folder_name) <
+              (int)sizeof(new_m3u_path),
+              "new m3u path too long for %s", cases[i].label);
+        CHECK(snprintf(new_marker_path, sizeof(new_marker_path), "%s/.shortcut",
+                       new_folder_path) < (int)sizeof(new_marker_path),
+              "marker path too long for %s", cases[i].label);
+        CHECK(write_file(old_m3u_path, "../Console (TAG)/Old Name.zip"),
+              "write m3u fixture failed for %s", cases[i].label);
+        {
+            char marker_path[SC_MAX_PATH * 2];
+            CHECK(snprintf(marker_path, sizeof(marker_path), "%s/.shortcut",
+                           old_folder_path) < (int)sizeof(marker_path),
+                  "old marker path too long for %s", cases[i].label);
+            CHECK(write_file(marker_path, old_display),
+                  "write marker fixture failed for %s", cases[i].label);
+        }
+
+        snprintf(sc.name, sizeof(sc.name), "%s", old_folder_name);
+        snprintf(sc.tag, sizeof(sc.tag), "%s", tag);
+        snprintf(sc.display, sizeof(sc.display), "%s", old_display);
+        snprintf(sc.path, sizeof(sc.path), "%s", old_folder_path);
+
+        CHECK(rename_shortcut(&sc, new_display) == 0,
+              "rename failed for %s", cases[i].label);
+        CHECK(!path_exists(old_folder_path),
+              "old folder still exists for %s", cases[i].label);
+        CHECK(path_is_dir(new_folder_path),
+              "new folder missing for %s", cases[i].label);
+        CHECK(!path_exists(old_m3u_path),
+              "old m3u still exists for %s", cases[i].label);
+        CHECK(path_exists(new_m3u_path),
+              "new m3u missing for %s", cases[i].label);
+        CHECK(file_contents_equal(new_marker_path, new_display),
+              "marker not updated for %s", cases[i].label);
+    }
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
 int main(void)
 {
     static const test_case tests[] = {
@@ -506,6 +779,10 @@ int main(void)
         { "multidisc and cue folders survive", test_multidisc_and_cue_folders_survive },
         { "show_hidden reveals hidden roms not sidecars", test_show_hidden_reveals_hidden_roms_not_sidecars },
         { "ports .ports dir always hidden", test_ports_dotports_always_hidden },
+        { "tool names preserve internal pak suffixes", test_tool_names_preserve_internal_pak_suffixes },
+        { "symlinked entries are skipped", test_symlinked_entries_are_skipped },
+        { "ensure_dir_exists rejects file collisions", test_ensure_dir_exists_rejects_file_collisions },
+        { "rename shortcut updates layout for all positions", test_rename_shortcut_updates_layout_for_all_positions },
     };
     int failures = 0;
 

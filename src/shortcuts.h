@@ -140,7 +140,8 @@ void get_screen_dimensions(int *w, int *h);
 
 app_settings load_settings(void);
 int save_settings(const app_settings *s);
-void artwork_bg_params(const app_settings *s, bool *use_global_bg, bool *force_black);
+void artwork_bg_params(const app_settings *s, bool *use_global_bg,
+                       bool *write_when_missing_art);
 
 /* ── device.c — File I/O utilities ────────────────────────────── */
 
@@ -174,7 +175,7 @@ void ensure_bridge_emu(void);
 /* ── artwork.c ────────────────────────────────────────────────── */
 
 void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
-                         bool use_global_bg, bool force_black);
+                         bool use_global_bg, bool write_when_missing_art);
 void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size);
 int regenerate_all_media(const app_settings *settings);
 int remove_all_media(void);
