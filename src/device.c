@@ -938,26 +938,34 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
             if (is_multi_disc_dir(full, base_name)) {
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
                 if (*n >= *cap) { closedir(d); return -1; }
-                rom_file *r = &(*arr)[(*n)++];
+                rom_file *r = &(*arr)[*n];
                 memset(r, 0, sizeof(*r));
-                snprintf(r->name, sizeof(r->name), "%s", name);
-                snprintf(r->path, sizeof(r->path), "%s", full);
-                snprintf(r->display, sizeof(r->display), "%s", base_name);
+                copy_cstr_trunc(r->name, sizeof(r->name), name);
+                if (!copy_cstr_exact(r->path, sizeof(r->path), full)) {
+                    ap_log("scan_roms: skipping overlong path %s", full);
+                    continue;
+                }
+                copy_cstr_trunc(r->display, sizeof(r->display), base_name);
                 r->is_multi_disc = true;
                 r->is_disabled = disabled;
+                (*n)++;
                 continue;
             }
 
             if (is_cue_folder_dir(full, base_name)) {
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
                 if (*n >= *cap) { closedir(d); return -1; }
-                rom_file *r = &(*arr)[(*n)++];
+                rom_file *r = &(*arr)[*n];
                 memset(r, 0, sizeof(*r));
-                snprintf(r->name, sizeof(r->name), "%s", name);
-                snprintf(r->path, sizeof(r->path), "%s", full);
-                snprintf(r->display, sizeof(r->display), "%s", base_name);
+                copy_cstr_trunc(r->name, sizeof(r->name), name);
+                if (!copy_cstr_exact(r->path, sizeof(r->path), full)) {
+                    ap_log("scan_roms: skipping overlong path %s", full);
+                    continue;
+                }
+                copy_cstr_trunc(r->display, sizeof(r->display), base_name);
                 r->is_cue_folder = true;
                 r->is_disabled = disabled;
+                (*n)++;
                 continue;
             }
 
@@ -973,12 +981,16 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
         if (is_non_game_extension(name)) continue;
         *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
         if (*n >= *cap) { closedir(d); return -1; }
-        rom_file *r = &(*arr)[(*n)++];
+        rom_file *r = &(*arr)[*n];
         memset(r, 0, sizeof(*r));
-        snprintf(r->name, sizeof(r->name), "%s", name);
-        snprintf(r->path, sizeof(r->path), "%s", full);
+        copy_cstr_trunc(r->name, sizeof(r->name), name);
+        if (!copy_cstr_exact(r->path, sizeof(r->path), full)) {
+            ap_log("scan_roms: skipping overlong path %s", full);
+            continue;
+        }
         strip_extension(base_name, r->display, sizeof(r->display));
         r->is_disabled = disabled;
+        (*n)++;
     }
     closedir(d);
     return 0;
