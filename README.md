@@ -70,7 +70,7 @@ Bulk artwork operations for all shortcuts:
 |--------|--------|---------|
 | Copy artwork when available | Off / On | **On** |
 | Artwork mode | Art on Black background / Art on Main menu Wallpaper / Fallback to wallpaper | **Art on Main menu Wallpaper** |
-| Show hidden/disabled/empty ROMs | Off / On | **Off** |
+| Show hidden/disabled ROMs | Off / On | **Off** |
 
 #### Copy artwork when available
 
@@ -86,14 +86,15 @@ Controls how `bg.png` is generated when a shortcut is created or artwork is rege
 
 - **Fallback to wallpaper** — Same as Art on Main menu Wallpaper when artwork exists. If a shortcut has no artwork, **no `bg.png` is created at all** and NextUI shows its default background for that entry.
 
-#### Show hidden/disabled/empty ROMs
+#### Show hidden/disabled ROMs
 
 When **Off** (default), the ROM and console pickers hide:
 - Folders and files that start with `.` (dot-prefixed)
 - Folders and files that end in `.disabled`
-- Console folders whose only contents are system dot-files (empty to the user)
+- Empty ROM folders
+- ROM folders whose contents are only manuals, artwork, metadata, saves, previews, or other non-ROM sidecars
 
-Turn this **On** to make those entries visible and selectable. Mac system folders (`.DS_Store`, `.Spotlight-V100`, etc.) are always hidden regardless of this setting.
+Turn this **On** to make hidden and `.disabled` ROMs visible and selectable. Empty folders and sidecar-only folders still stay hidden because they do not contain any selectable ROMs. Mac system folders (`.DS_Store`, `.Spotlight-V100`, etc.) are always hidden regardless of this setting.
 
 ## Five Game Handheld Mode
 
@@ -123,7 +124,7 @@ These folders will no longer appear in NextUI's Roms section. Your ROM files sta
 
 **Step 2 — Enable "Show hidden/disabled" in Shortcuts Settings**
 
-Open **Shortcuts → Settings** and set **Show hidden/disabled/empty ROMs** to **On**.
+Open **Shortcuts → Settings** and set **Show hidden/disabled ROMs** to **On**.
 
 **Step 3 — Create your shortcuts**
 
@@ -131,9 +132,9 @@ Use **Add ROM Shortcut** to pick each game you want on your main menu. The `.dis
 
 ### Swapping or adding games
 
-1. Open **Shortcuts → Settings**, make sure **Show hidden/disabled/empty ROMs** is set to **On**
+1. Open **Shortcuts → Settings**, make sure **Show hidden/disabled ROMs** is set to **On**
 2. Use **Add ROM Shortcut** to add a new game, or **Manage Shortcuts** to delete an old one
-3. Optional: Turn **Show hidden/disabled/empty ROMs** back to **Off**
+3. Optional: Turn **Show hidden/disabled ROMs** back to **Off**
 
 ### Tips
 

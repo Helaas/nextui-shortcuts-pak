@@ -125,7 +125,6 @@ bool build_folder_name(sc_position pos, const char *display, const char *tag,
 bool is_hidden(const char *name);
 bool is_mac_dotfile(const char *name);
 bool is_shortcut_folder(const char *folder_path);
-bool dir_has_visible_content(const char *path);
 
 /* ── device.c — Path resolution ───────────────────────────────── */
 

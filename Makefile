@@ -10,17 +10,20 @@ APOSTROPHE_DIR := third_party/apostrophe
 BUILD_DIR := build
 DIST_DIR := $(BUILD_DIR)/release
 STAGING_DIR := $(BUILD_DIR)/staging
+TEST_BUILD_DIR := $(BUILD_DIR)/tests
+TEST_BIN := $(TEST_BUILD_DIR)/scan_tests
 SRC_FILES := $(shell find src -name '*.c' -print | sort)
+TEST_SRC_FILES := tests/scan_tests.c tests/test_stubs.c src/device.c src/cjson/cjson.c
 
 TG5040_TOOLCHAIN := ghcr.io/loveretro/tg5040-toolchain:latest
 TG5050_TOOLCHAIN := ghcr.io/loveretro/tg5050-toolchain:latest
 MY355_TOOLCHAIN  := ghcr.io/loveretro/my355-toolchain:latest
 ADB ?= adb
 
-COMMON_INCLUDES := -I$(APOSTROPHE_DIR)/include
+COMMON_INCLUDES := -I$(APOSTROPHE_DIR)/include -Isrc
 
 .PHONY: all native mac run-mac run-native tg5040 tg5050 my355 \
-	package package-tg5040 package-tg5050 package-my355 do-package \
+	test-native package package-tg5040 package-tg5050 package-my355 do-package \
 	deploy deploy-platform clean help
 
 # ── Default target ──────────────────────────────────────────
@@ -44,6 +47,20 @@ mac:
 
 run-mac: mac
 	./$(BUILD_DIR)/mac/$(APP_NAME)
+
+$(TEST_BIN): $(TEST_SRC_FILES)
+	@mkdir -p $(TEST_BUILD_DIR)
+	cc -std=gnu11 -O0 -g \
+		-DPLATFORM_MAC \
+		$(COMMON_INCLUDES) \
+		$(shell pkg-config --cflags sdl2 SDL2_ttf SDL2_image) \
+		-o $(TEST_BIN) \
+		$(TEST_SRC_FILES) \
+		$(shell pkg-config --libs sdl2 SDL2_ttf SDL2_image) \
+		-lm -lpthread
+
+test-native: $(TEST_BIN)
+	./$(TEST_BIN)
 
 # ── Docker cross-compilation ────────────────────────────────
 
@@ -174,6 +191,7 @@ help:
 	@echo "Targets:"
 	@echo "  native        Build the mac development binary"
 	@echo "  run-native    Build and run the mac binary"
+	@echo "  test-native   Build and run native scan tests"
 	@echo "  all           Build tg5040, tg5050, and my355"
 	@echo "  mac           Build for macOS (native)"
 	@echo "  run-mac       Build and run for macOS"

@@ -828,6 +828,7 @@ void show_settings_screen(void)
         .footer = footer,
         .footer_count = 3,
         .confirm_button = AP_BTN_A,
+        .help_text = "Empty and sidecar-only ROM folders stay hidden.",
         .label_font = ap_get_font(AP_FONT_MEDIUM),
     };
 

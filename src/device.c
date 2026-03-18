@@ -286,7 +286,9 @@ static bool is_non_game_extension(const char *name)
     if (strcasecmp(ext, "txt") == 0 || strcasecmp(ext, "xml") == 0 ||
         strcasecmp(ext, "nfo") == 0 || strcasecmp(ext, "htm") == 0 ||
         strcasecmp(ext, "html") == 0 || strcasecmp(ext, "log") == 0 ||
-        strcasecmp(ext, "cfg") == 0 || strcasecmp(ext, "ini") == 0)
+        strcasecmp(ext, "cfg") == 0 || strcasecmp(ext, "ini") == 0 ||
+        strcasecmp(ext, "pdf") == 0 || strcasecmp(ext, "doc") == 0 ||
+        strcasecmp(ext, "docx") == 0 || strcasecmp(ext, "rtf") == 0)
         return true;
 
     /* Save data */
@@ -294,7 +296,66 @@ static bool is_non_game_extension(const char *name)
         strcasecmp(ext, "oops") == 0 || strcasecmp(ext, "db") == 0)
         return true;
 
+    /* Preview videos / scrape sidecars */
+    if (strcasecmp(ext, "mp4") == 0 || strcasecmp(ext, "m4v") == 0 ||
+        strcasecmp(ext, "mkv") == 0 || strcasecmp(ext, "avi") == 0 ||
+        strcasecmp(ext, "mov") == 0 || strcasecmp(ext, "webm") == 0)
+        return true;
+
     return false;
+}
+
+static bool should_skip_rom_entry(const char *name, bool show_hidden)
+{
+    if (!name || name[0] == '\0') return true;
+    if (!show_hidden && is_hidden(name)) return true;
+    if (show_hidden && is_always_hidden_system_entry(name)) return true;
+    return false;
+}
+
+static bool should_skip_console_dir(const char *name, bool show_hidden)
+{
+    if (!name || name[0] == '\0') return true;
+    if (!show_hidden) return is_hidden(name);
+    return is_mac_dotfile(name) || is_always_hidden_system_entry(name);
+}
+
+static bool copy_entry_base_name(const char *name, char *out, size_t out_size)
+{
+    static const char disabled_suffix[] = ".disabled";
+    size_t len;
+    bool disabled;
+
+    copy_cstr_trunc(out, out_size, name);
+    len = strlen(out);
+    disabled = ends_with(out, disabled_suffix);
+    if (disabled && len >= sizeof(disabled_suffix) - 1)
+        out[len - (sizeof(disabled_suffix) - 1)] = '\0';
+    return disabled;
+}
+
+static bool dir_has_named_companion(const char *dir_path,
+                                    const char *base_name,
+                                    const char *suffix)
+{
+    char candidate[SC_MAX_PATH * 2];
+    struct stat st;
+
+    if (!join_path_with_suffix(candidate, sizeof(candidate),
+                               dir_path, base_name, suffix))
+        return false;
+
+    return stat(candidate, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static bool is_multi_disc_dir(const char *dir_path, const char *base_name)
+{
+    return dir_has_named_companion(dir_path, base_name, ".m3u");
+}
+
+static bool is_cue_folder_dir(const char *dir_path, const char *base_name)
+{
+    return dir_has_named_companion(dir_path, base_name, ".cue");
 }
 
 bool is_shortcut_folder(const char *folder_path)
@@ -315,21 +376,80 @@ bool is_shortcut_folder(const char *folder_path)
     return stat(marker, &st) == 0;
 }
 
-bool dir_has_visible_content(const char *path)
+static bool dir_has_rom_candidate_content_internal(const char *path,
+                                                   bool show_hidden,
+                                                   bool fail_on_open_error,
+                                                   bool *out_has_candidate)
 {
     DIR *d = opendir(path);
-    if (!d) return false;
+    bool has_candidate = false;
+
+    if (!d) {
+        if (out_has_candidate) *out_has_candidate = false;
+        return !fail_on_open_error;
+    }
+
     struct dirent *ent;
     while ((ent = readdir(d)) != NULL) {
+        const char *name = ent->d_name;
+        char base_name[SC_MAX_NAME];
+        char full[SC_MAX_PATH * 2];
+        struct stat st;
+
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
             continue;
-        if (!is_hidden(ent->d_name)) {
-            closedir(d);
-            return true;
+
+        if (should_skip_rom_entry(name, show_hidden))
+            continue;
+
+        copy_entry_base_name(name, base_name, sizeof(base_name));
+        if (!join_path(full, sizeof(full), path, name))
+            continue;
+        if (stat(full, &st) != 0)
+            continue;
+
+        if (S_ISDIR(st.st_mode)) {
+            bool child_has_candidate = false;
+
+            if (is_multi_disc_dir(full, base_name) ||
+                is_cue_folder_dir(full, base_name)) {
+                has_candidate = true;
+                break;
+            }
+
+            if (!dir_has_rom_candidate_content_internal(full, show_hidden,
+                                                        false,
+                                                        &child_has_candidate)) {
+                closedir(d);
+                return false;
+            }
+            if (child_has_candidate) {
+                has_candidate = true;
+                break;
+            }
+            continue;
         }
+
+        if (is_non_game_extension(name))
+            continue;
+
+        has_candidate = true;
+        break;
     }
+
     closedir(d);
-    return false;
+    if (out_has_candidate) *out_has_candidate = has_candidate;
+    return true;
+}
+
+static bool dir_has_rom_candidate_content(const char *path, bool show_hidden)
+{
+    bool has_candidate = false;
+
+    if (!dir_has_rom_candidate_content_internal(path, show_hidden,
+                                                false, &has_candidate))
+        return false;
+    return has_candidate;
 }
 
 /* ── File I/O utilities ───────────────────────────────────────── */
@@ -749,20 +869,12 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
 
         const char *name = ent->d_name;
 
-        if (!show_hidden) {
-            if (is_hidden(name)) continue;
-            if (!dir_has_visible_content(full)) continue;
-        } else {
-            if (is_mac_dotfile(name) || strcmp(name, "map.txt") == 0) continue;
-        }
+        if (should_skip_console_dir(name, show_hidden)) continue;
+        if (!dir_has_rom_candidate_content(full, show_hidden)) continue;
 
         /* Strip .disabled suffix for tag/display extraction. */
-        bool disabled = ends_with(name, ".disabled");
         char base_name[SC_MAX_NAME];
-        copy_cstr_trunc(base_name, sizeof(base_name), name);
-        if (disabled) {
-            base_name[strlen(base_name) - strlen(".disabled")] = '\0';
-        }
+        bool disabled = copy_entry_base_name(name, base_name, sizeof(base_name));
 
         char tag[SC_MAX_TAG];
         extract_tag(base_name, tag, sizeof(tag));
@@ -808,29 +920,22 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
 
         const char *name = ent->d_name;
 
-        if (!show_hidden) {
-            if (is_hidden(name)) continue;
-        } else {
-            if (is_always_hidden_system_entry(name)) continue;
-        }
-
-        bool disabled = ends_with(name, ".disabled");
+        bool disabled;
         char base_name[SC_MAX_NAME];
-        snprintf(base_name, sizeof(base_name), "%s", name);
-        if (disabled)
-            base_name[strlen(base_name) - strlen(".disabled")] = '\0';
-
-        char full[SC_MAX_PATH];
-        snprintf(full, sizeof(full), "%s/%s", dir_path, name);
+        char full[SC_MAX_PATH * 2];
         struct stat st;
+
+        if (should_skip_rom_entry(name, show_hidden))
+            continue;
+
+        disabled = copy_entry_base_name(name, base_name, sizeof(base_name));
+
+        if (!join_path(full, sizeof(full), dir_path, name))
+            continue;
         if (stat(full, &st) != 0) continue;
 
         if (S_ISDIR(st.st_mode)) {
-            /* Check for multi-disc: {baseName}.m3u inside subfolder. */
-            char check[SC_MAX_PATH * 2];
-            snprintf(check, sizeof(check), "%s/%s.m3u", full, base_name);
-            struct stat m3u_st;
-            if (stat(check, &m3u_st) == 0) {
+            if (is_multi_disc_dir(full, base_name)) {
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
                 if (*n >= *cap) { closedir(d); return -1; }
                 rom_file *r = &(*arr)[(*n)++];
@@ -843,9 +948,7 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
                 continue;
             }
 
-            /* Check for CUE folder: {baseName}.cue inside subfolder. */
-            snprintf(check, sizeof(check), "%s/%s.cue", full, base_name);
-            if (stat(check, &m3u_st) == 0) {
+            if (is_cue_folder_dir(full, base_name)) {
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
                 if (*n >= *cap) { closedir(d); return -1; }
                 rom_file *r = &(*arr)[(*n)++];
