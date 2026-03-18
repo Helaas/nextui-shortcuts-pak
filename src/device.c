@@ -254,6 +254,19 @@ bool is_mac_dotfile(const char *name)
     return tag[0] == '\0';
 }
 
+static bool is_always_hidden_system_entry(const char *name)
+{
+    if (!name || name[0] == '\0') return false;
+
+    return strcmp(name, "map.txt") == 0 ||
+           strcmp(name, ".DS_Store") == 0 ||
+           strcmp(name, ".Spotlight-V100") == 0 ||
+           strcmp(name, ".Trashes") == 0 ||
+           strcmp(name, ".fseventsd") == 0 ||
+           strcmp(name, ".TemporaryItems") == 0 ||
+           starts_with(name, "._");
+}
+
 bool is_shortcut_folder(const char *folder_path)
 {
     const char *name = strrchr(folder_path, '/');
@@ -342,16 +355,24 @@ int rmdir_recursive(const char *path)
     while ((ent = readdir(d)) != NULL) {
         if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
             continue;
-        char child[SC_MAX_PATH];
+        char child[SC_MAX_PATH * 2];
         if (!join_path(child, sizeof(child), path, ent->d_name)) {
             closedir(d);
             return -1;
         }
         struct stat st;
-        if (stat(child, &st) == 0 && S_ISDIR(st.st_mode)) {
-            rmdir_recursive(child);
-        } else {
-            unlink(child);
+        if (lstat(child, &st) != 0) {
+            closedir(d);
+            return -1;
+        }
+        if (S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode)) {
+            if (unlink(child) != 0) {
+                closedir(d);
+                return -1;
+            }
+        } else if (rmdir_recursive(child) != 0) {
+            closedir(d);
+            return -1;
         }
     }
     closedir(d);
@@ -744,10 +765,11 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
 
 /* Internal recursive ROM scanner. */
 static int scan_roms_internal(const char *dir_path, bool show_hidden,
-                              rom_file **arr, int *n, int *cap)
+                              rom_file **arr, int *n, int *cap,
+                              bool fail_on_open_error)
 {
     DIR *d = opendir(dir_path);
-    if (!d) return -1;
+    if (!d) return fail_on_open_error ? -1 : 0;
     struct dirent *ent;
 
     while ((ent = readdir(d)) != NULL) {
@@ -759,7 +781,7 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
         if (!show_hidden) {
             if (is_hidden(name)) continue;
         } else {
-            if (name[0] == '.' || strcmp(name, "map.txt") == 0) continue;
+            if (is_always_hidden_system_entry(name)) continue;
         }
 
         bool disabled = ends_with(name, ".disabled");
@@ -780,7 +802,7 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
             struct stat m3u_st;
             if (stat(check, &m3u_st) == 0) {
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
-                if (*n >= *cap) { closedir(d); free(*arr); *arr = NULL; return -1; }
+                if (*n >= *cap) { closedir(d); return -1; }
                 rom_file *r = &(*arr)[(*n)++];
                 memset(r, 0, sizeof(*r));
                 snprintf(r->name, sizeof(r->name), "%s", name);
@@ -795,7 +817,7 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
             snprintf(check, sizeof(check), "%s/%s.cue", full, base_name);
             if (stat(check, &m3u_st) == 0) {
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
-                if (*n >= *cap) { closedir(d); free(*arr); *arr = NULL; return -1; }
+                if (*n >= *cap) { closedir(d); return -1; }
                 rom_file *r = &(*arr)[(*n)++];
                 memset(r, 0, sizeof(*r));
                 snprintf(r->name, sizeof(r->name), "%s", name);
@@ -807,13 +829,16 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
             }
 
             /* Plain subfolder — recurse. */
-            scan_roms_internal(full, show_hidden, arr, n, cap);
+            if (scan_roms_internal(full, show_hidden, arr, n, cap, false) != 0) {
+                closedir(d);
+                return -1;
+            }
             continue;
         }
 
         /* Regular file. */
         *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
-        if (*n >= *cap) { closedir(d); free(*arr); *arr = NULL; return -1; }
+        if (*n >= *cap) { closedir(d); return -1; }
         rom_file *r = &(*arr)[(*n)++];
         memset(r, 0, sizeof(*r));
         snprintf(r->name, sizeof(r->name), "%s", name);
@@ -831,7 +856,8 @@ int scan_roms(const char *console_path, bool show_hidden,
     rom_file *arr = NULL;
     int n = 0, cap = 0;
 
-    int rc = scan_roms_internal(console_path, show_hidden, &arr, &n, &cap);
+    int rc = scan_roms_internal(console_path, show_hidden, &arr, &n, &cap,
+                                true);
     if (rc != 0) {
         free(arr);
         *out = NULL;
@@ -969,7 +995,7 @@ int scan_shortcuts(shortcut_entry **out, int *count)
         }
 
         arr = grow_array(arr, &cap, n, sizeof(shortcut_entry));
-        if (!arr) { closedir(d); *out = NULL; *count = 0; return -1; }
+        if (n >= cap) { closedir(d); free(arr); *out = NULL; *count = 0; return -1; }
 
         shortcut_entry *sc = &arr[n];
         memset(sc, 0, sizeof(*sc));
@@ -1175,6 +1201,13 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
 int remove_shortcut(const char *shortcut_path)
 {
     ap_log("remove_shortcut: path=%s", shortcut_path);
+
+    struct stat st;
+    if (lstat(shortcut_path, &st) != 0)
+        return -1;
+    if (S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode))
+        return unlink(shortcut_path);
+
     return rmdir_recursive(shortcut_path);
 }
 

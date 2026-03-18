@@ -484,7 +484,12 @@ void add_rom_shortcut_flow(void)
     args.settings = load_settings();
 
     ap_process_opts proc = { .message = "Creating shortcut..." };
-    ap_process_message(&proc, create_rom_worker, &args);
+    int rc = ap_process_message(&proc, create_rom_worker, &args);
+    if (rc != AP_OK) {
+        ap_log("ui: create rom shortcut failed rc=%d", rc);
+        show_error("Could not create shortcut.");
+        return;
+    }
 
     char done_msg[1024];
     snprintf(done_msg, sizeof(done_msg),
@@ -536,7 +541,12 @@ void add_tool_shortcut_flow(void)
     args.settings = load_settings();
 
     ap_process_opts proc = { .message = "Creating shortcut..." };
-    ap_process_message(&proc, create_tool_worker, &args);
+    int rc = ap_process_message(&proc, create_tool_worker, &args);
+    if (rc != AP_OK) {
+        ap_log("ui: create tool shortcut failed rc=%d", rc);
+        show_error("Could not create shortcut.");
+        return;
+    }
 
     char done_msg[1024];
     snprintf(done_msg, sizeof(done_msg),
@@ -603,7 +613,12 @@ static detail_action show_shortcut_detail(const shortcut_entry *sc)
     snprintf(rargs.path, sizeof(rargs.path), "%s", sc->path);
 
     ap_process_opts proc = { .message = "Removing shortcut..." };
-    ap_process_message(&proc, remove_worker, &rargs);
+    int proc_rc = ap_process_message(&proc, remove_worker, &rargs);
+    if (proc_rc != AP_OK) {
+        ap_log("ui: remove shortcut failed rc=%d", proc_rc);
+        show_error("Could not remove shortcut.");
+        return DETAIL_ACTION_BACK;
+    }
 
     show_info("Shortcut removed.");
     return DETAIL_ACTION_DELETED;
@@ -687,7 +702,12 @@ static void regenerate_all_media_flow(void)
     regen_args args;
     args.settings = load_settings();
     ap_process_opts proc = { .message = "Regenerating artwork..." };
-    ap_process_message(&proc, regen_worker, &args);
+    int rc = ap_process_message(&proc, regen_worker, &args);
+    if (rc != AP_OK) {
+        ap_log("ui: regenerate artwork failed rc=%d", rc);
+        show_error("Could not regenerate artwork.");
+        return;
+    }
 
     show_info("Artwork regenerated for all shortcuts.");
 }
@@ -702,7 +722,12 @@ static void remove_all_media_flow(void)
         return;
 
     ap_process_opts proc = { .message = "Removing artwork..." };
-    ap_process_message(&proc, remove_media_worker, NULL);
+    int rc = ap_process_message(&proc, remove_media_worker, NULL);
+    if (rc != AP_OK) {
+        ap_log("ui: remove artwork failed rc=%d", rc);
+        show_error("Could not remove artwork.");
+        return;
+    }
 
     show_info("Artwork removed from all shortcuts.");
 }
