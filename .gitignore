@@ -1,12 +1,6 @@
 # Build output
 build/
 
-# Vendored dependencies (regenerate with: make deps)
-vendor/
-
-# Docker/Go build cache
-.cache/
-
 # Mock SD
 mock_sdcard/
 
@@ -15,8 +9,3 @@ mock_sdcard/
 
 # Logs
 *.log
-
-# Binaries
-shortcuts
-*.exe
-nextui-shortcuts-pak

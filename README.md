@@ -1,6 +1,6 @@
 # Shortcuts
 
-Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050 devices. This Pak uses Gabagool for a native UI and builds the shortcut folders and .m3u files that NextUI auto-launches.
+Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050/my355 devices. This Pak uses Apostrophe for a native UI and builds the shortcut folders and `.m3u` files that NextUI auto-launches.
 
 ## Supported Platforms
 
@@ -9,6 +9,7 @@ Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050
 | `tg5040` (TG5040) | TrimUI Smart Pro | 1280×720 | Docker (ARM64) |
 | `tg5040` (TG3040) | TrimUI Brick | 1024×768 | Docker (ARM64) |
 | `tg5050` | TrimUI Smart Pro S | 1280×720 | Docker (ARM64) |
+| `my355` | Miyoo Flip | 640×480 | Docker (ARM64) |
 
 > The Brick and Smart Pro share the same `tg5040` filesystem layout (tools, roms, settings paths are identical). The pak auto-detects the Brick via the `DEVICE` environment variable (`"brick"` vs `"smartpro"`), which NextUI's `launch.sh` exports at startup, and generates correctly sized `bg.png` images at 1024×768.
 
@@ -52,7 +53,7 @@ Browse installed Tools (`.pak` directories), pick one, choose a sort position, a
 
 ### Manage Shortcuts
 
-Browse all existing shortcuts. Select one to view details (name, type, tag, target path) and optionally delete it.
+Browse all existing shortcuts. Press **A** to view details and delete, or **Y** to rename a shortcut using the on-screen keyboard.
 
 ### Manage Artwork
 
@@ -69,7 +70,7 @@ Bulk artwork operations for all shortcuts:
 |--------|--------|---------|
 | Copy artwork when available | Off / On | **On** |
 | Artwork mode | Art on Black background / Art on Main menu Wallpaper / Fallback to wallpaper | **Art on Main menu Wallpaper** |
-| Show hidden/disabled/empty ROMs | Off / On | **Off** |
+| Show hidden/disabled ROMs | Off / On | **Off** |
 
 #### Copy artwork when available
 
@@ -85,14 +86,15 @@ Controls how `bg.png` is generated when a shortcut is created or artwork is rege
 
 - **Fallback to wallpaper** — Same as Art on Main menu Wallpaper when artwork exists. If a shortcut has no artwork, **no `bg.png` is created at all** and NextUI shows its default background for that entry.
 
-#### Show hidden/disabled/empty ROMs
+#### Show hidden/disabled ROMs
 
 When **Off** (default), the ROM and console pickers hide:
 - Folders and files that start with `.` (dot-prefixed)
 - Folders and files that end in `.disabled`
-- Console folders whose only contents are system dot-files (empty to the user)
+- Empty ROM folders
+- ROM folders whose contents are only manuals, artwork, metadata, saves, previews, or other non-ROM sidecars
 
-Turn this **On** to make those entries visible and selectable. Mac system folders (`.DS_Store`, `.Spotlight-V100`, etc.) are always hidden regardless of this setting.
+Turn this **On** to make hidden and `.disabled` ROMs visible and selectable. Empty folders and sidecar-only folders still stay hidden because they do not contain any selectable ROMs. Mac system folders (`.DS_Store`, `.Spotlight-V100`, etc.) are always hidden regardless of this setting.
 
 ## Five Game Handheld Mode
 
@@ -122,7 +124,7 @@ These folders will no longer appear in NextUI's Roms section. Your ROM files sta
 
 **Step 2 — Enable "Show hidden/disabled" in Shortcuts Settings**
 
-Open **Shortcuts → Settings** and set **Show hidden/disabled/empty ROMs** to **On**.
+Open **Shortcuts → Settings** and set **Show hidden/disabled ROMs** to **On**.
 
 **Step 3 — Create your shortcuts**
 
@@ -130,9 +132,9 @@ Use **Add ROM Shortcut** to pick each game you want on your main menu. The `.dis
 
 ### Swapping or adding games
 
-1. Open **Shortcuts → Settings**, make sure **Show hidden/disabled/empty ROMs** is set to **On**
+1. Open **Shortcuts → Settings**, make sure **Show hidden/disabled ROMs** is set to **On**
 2. Use **Add ROM Shortcut** to add a new game, or **Manage Shortcuts** to delete an old one
-3. Optional: Turn **Show hidden/disabled/empty ROMs** back to **Off**
+3. Optional: Turn **Show hidden/disabled ROMs** back to **Off**
 
 ### Tips
 
@@ -206,41 +208,37 @@ The platform is read from `PLATFORM`. If not set, it defaults to `tg5040`.
 
 **macOS (development):**
 ```bash
-brew install go sdl2 sdl2_ttf sdl2_image sdl2_gfx
+brew install sdl2 sdl2_ttf sdl2_image
 ```
 
-**Embedded (tg5040/tg5050):**
+**Embedded (tg5040/tg5050/my355):**
 - Docker with ARM64 support
 
 ### First-Time Setup
 
 ```bash
-make deps
+git submodule update --init --recursive
 ```
-
-This vendors dependencies and applies the Gabagool power button patch for tg5050.
 
 ### Build Commands
 
 ```bash
-# Auto-detect platform and build
-make
+# Build all embedded platforms
+make all
 
-# Build for specific platform
+# Build for macOS development
+make mac
+
+# Build for a specific platform
 make tg5040
 make tg5050
+make my355
 
-# Build for all embedded platforms
-make embedded
-
-# Package as .pak bundles for NextUI
+# Package .pak.zip files per platform and a combined .pakz
 make package
 
-# Export TrimUI .pakz (Tools/tg5040 + Tools/tg5050 layout)
-make export-trimui
-
-# Update dependencies and re-apply patches
-make deps
+# Detect an adb target and deploy the matching build
+make deploy
 
 # See all targets
 make help
@@ -252,20 +250,21 @@ make help
 |--------|--------|
 | tg5040 | `build/release/tg5040/Shortcuts.pak.zip` |
 | tg5050 | `build/release/tg5050/Shortcuts.pak.zip` |
-| export-trimui | `build/release/trimui/Shortcuts.pakz` |
+| my355 | `build/release/my355/Shortcuts.pak.zip` |
+| package | `build/release/all/Shortcuts.pakz` |
 
-The `.pak.zip` includes the binary, `launch.sh`, `pak.json`, `LICENSE`, and required shared libraries.
+The `.pak.zip` includes the binary, `launch.sh`, `pak.json`, `LICENSE`, and any staged runtime libraries.
 
 ## Installing on a Handheld
 
-1. Build and package: `make package` or `make export-trimui`
-2. If using `make package`, extract `Shortcuts.pak.zip` to your SD card as `Tools/<platform>/Shortcuts.pak/`
-3. If using `make export-trimui`, place `Shortcuts.pakz` in the root of your SD card; NextUI will auto-install it upon (re)boot
+1. Build and package: `make package`
+2. To install a single-platform build manually, extract `build/release/<platform>/Shortcuts.pak.zip` to `Tools/<platform>/Shortcuts.pak/` on your SD card
+3. To use the combined package, place `build/release/all/Shortcuts.pakz` in the root of your SD card; NextUI will auto-install it upon (re)boot
 4. Launch from the NextUI Tools menu
 
 ## Acknowledgements
 
-Built with [Gabagool](https://github.com/BrandonKowalski/gabagool) by [@BrandonKowalski](https://github.com/BrandonKowalski).
+Built with [Apostrophe](https://github.com/Helaas/Apostrophe). The original Go version of this pak was built with [Gabagool](https://github.com/BrandonKowalski/gabagool) by [@BrandonKowalski](https://github.com/BrandonKowalski).
 
 ## License
 
