@@ -233,7 +233,11 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
 
     if (sc->is_tool) {
         /* Derive tool name from target path (e.g. ".../Retroarch.pak" → "Retroarch")
-         * so artwork lookup works even if the shortcut was renamed. */
+         * so artwork lookup works even if the shortcut was renamed.
+         *
+         * Be robust to multi-extension names like "Retroarch.pak.disabled":
+         *   - strip a trailing ".pak.disabled" or ".pak" suffix if present
+         *   - then strip any remaining generic extension (.exe, .sh, etc.) */
         char tools_dir[SC_MAX_PATH];
         get_tools_path(tools_dir, sizeof(tools_dir));
 
@@ -242,7 +246,19 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
         if (sc->target_path[0] != '\0') {
             const char *base = strrchr(sc->target_path, '/');
             base = base ? base + 1 : sc->target_path;
-            strip_extension(base, tool_name, sizeof(tool_name));
+
+            char base_name[SC_MAX_DISPLAY];
+            snprintf(base_name, sizeof(base_name), "%s", base);
+            size_t len = strlen(base_name);
+
+            /* Strip .pak.disabled or .pak suffix first. */
+            if (ends_with(base_name, ".pak.disabled"))
+                base_name[len - 13] = '\0';
+            else if (ends_with(base_name, ".pak"))
+                base_name[len - 4] = '\0';
+
+            /* Then strip any remaining generic extension. */
+            strip_extension(base_name, tool_name, sizeof(tool_name));
             art_name = tool_name;
         }
         snprintf(out, out_size, "%s/.media/%s.png", tools_dir, art_name);
