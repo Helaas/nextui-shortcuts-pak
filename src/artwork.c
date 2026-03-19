@@ -247,7 +247,7 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
             const char *base = strrchr(sc->target_path, '/');
             base = base ? base + 1 : sc->target_path;
 
-            char base_name[SC_MAX_DISPLAY];
+            char base_name[SC_MAX_PATH];
             snprintf(base_name, sizeof(base_name), "%s", base);
             size_t len = strlen(base_name);
 

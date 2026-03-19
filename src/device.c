@@ -519,7 +519,7 @@ int ensure_dir_exists(const char *path)
             *p = '\0';
             if (mkdir(tmp, 0755) != 0) {
                 if (errno != EEXIST ||
-                    lstat(tmp, &st) != 0 ||
+                    stat(tmp, &st) != 0 ||
                     !S_ISDIR(st.st_mode)) {
                     *p = '/';
                     free(tmp);
@@ -533,7 +533,7 @@ int ensure_dir_exists(const char *path)
     if (mkdir(tmp, 0755) == 0) {
         rc = 0;
     } else if (errno == EEXIST &&
-               lstat(tmp, &st) == 0 &&
+               stat(tmp, &st) == 0 &&
                S_ISDIR(st.st_mode)) {
         rc = 0;
     } else {
