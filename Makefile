@@ -51,12 +51,10 @@ run-mac: mac
 $(TEST_BIN): $(TEST_SRC_FILES)
 	@mkdir -p $(TEST_BUILD_DIR)
 	cc -std=gnu11 -O0 -g \
-		-DPLATFORM_MAC \
+		-DPLATFORM_MAC -DTESTING \
 		$(COMMON_INCLUDES) \
-		$(shell pkg-config --cflags sdl2 SDL2_ttf SDL2_image) \
 		-o $(TEST_BIN) \
 		$(TEST_SRC_FILES) \
-		$(shell pkg-config --libs sdl2 SDL2_ttf SDL2_image) \
 		-lm -lpthread
 
 test-native: $(TEST_BIN)

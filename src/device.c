@@ -2,7 +2,9 @@
  * device.c — Core logic: string utilities, path resolution, settings,
  *            filesystem scanning, shortcut CRUD, and bridge emu management.
  */
+#ifndef TESTING
 #include "apostrophe.h"
+#endif
 #include "shortcuts.h"
 #include "cjson/cjson.h"
 
@@ -716,7 +718,8 @@ int save_settings(const app_settings *s)
     char *slash = strrchr(dir, '/');
     if (slash) {
         *slash = '\0';
-        ensure_dir_exists(dir);
+        if (ensure_dir_exists(dir) != 0)
+            return -1;
     }
 
     cJSON *json = cJSON_CreateObject();
@@ -1483,17 +1486,27 @@ int rename_shortcut(const shortcut_entry *sc, const char *new_display)
 
     /* Rename .m3u file inside the (now renamed) folder. */
     char old_m3u[SC_MAX_PATH * 2], new_m3u[SC_MAX_PATH * 2];
-    if (join_path_with_suffix(old_m3u, sizeof(old_m3u),
-                               new_folder_path, sc->name, ".m3u") &&
-        join_path_with_suffix(new_m3u, sizeof(new_m3u),
+    if (!join_path_with_suffix(old_m3u, sizeof(old_m3u),
+                               new_folder_path, sc->name, ".m3u") ||
+        !join_path_with_suffix(new_m3u, sizeof(new_m3u),
                                new_folder_path, new_folder_name, ".m3u")) {
-        if (rename(old_m3u, new_m3u) != 0)
-            ap_log("rename_shortcut: m3u rename failed: %s", strerror(errno));
+        ap_log("rename_shortcut: m3u path too long");
+        rename(new_folder_path, sc->path);
+        return -1;
+    }
+    if (rename(old_m3u, new_m3u) != 0) {
+        ap_log("rename_shortcut: m3u rename failed: %s", strerror(errno));
+        rename(new_folder_path, sc->path);
+        return -1;
     }
 
     /* Update .shortcut marker with new display name. */
-    if (write_shortcut_marker(new_folder_path, new_display) != 0)
+    if (write_shortcut_marker(new_folder_path, new_display) != 0) {
         ap_log("rename_shortcut: marker update failed");
+        rename(new_m3u, old_m3u);
+        rename(new_folder_path, sc->path);
+        return -1;
+    }
 
     ap_log("rename_shortcut: done -> %s", new_folder_path);
     return 0;

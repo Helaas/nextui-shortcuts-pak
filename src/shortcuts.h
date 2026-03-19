@@ -6,6 +6,12 @@
 #define SHORTCUTS_H
 
 #include <stdbool.h>
+#include <stdarg.h>
+
+/* ── Logging (declared here so device.c can be compiled without apostrophe.h
+ *    in test builds) ─────────────────────────────────────────── */
+
+void ap_log(const char *fmt, ...);
 
 /* ── Size limits ──────────────────────────────────────────────── */
 

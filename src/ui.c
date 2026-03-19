@@ -519,7 +519,7 @@ void add_tool_shortcut_flow(void)
     tool_pak tool;
     if (!pick_tool(&tool)) return;
 
-    const char *display_name = tool.display;
+    const char *display_name = tool.name;
     ap_log("ui: add tool shortcut: tool=%s", tool.name);
 
     if (shortcut_exists(display_name, BRIDGE_EMU_TAG)) {
