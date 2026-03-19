@@ -285,6 +285,13 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
     strip_extension(rom_filename, rom_display, sizeof(rom_display));
     free(data);
 
+    /* Multi-disc / CUE-folder fix: the .m3u relative path has an extra
+     * directory level whose name matches the ROM display name.  Artwork
+     * lives at the console level, not inside the subfolder. */
+    char *parent_last_slash = strrchr(rom_parent_rel, '/');
+    if (parent_last_slash && strcmp(parent_last_slash + 1, rom_display) == 0)
+        *parent_last_slash = '\0';
+
     char roms_dir[SC_MAX_PATH];
     get_roms_path(roms_dir, sizeof(roms_dir));
     snprintf(out, out_size, "%s/%s/.media/%s.png",
