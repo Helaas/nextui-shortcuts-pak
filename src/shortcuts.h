@@ -178,6 +178,13 @@ bool shortcut_exists(const char *display_name, const char *tag);
 
 void ensure_bridge_emu(void);
 
+/* ── resume_sync.c ─────────────────────────────────────────────── */
+
+void ensure_resume_sync_autostart(void);
+void start_resume_sync_helper(const char *argv0);
+int resume_sync_once(void);
+int resume_sync_daemon(void);
+
 /* ── artwork.c ────────────────────────────────────────────────── */
 
 void generate_artwork_bg(const char *art_src_path, const char *dest_folder,

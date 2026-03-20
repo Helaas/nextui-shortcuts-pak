@@ -20,6 +20,7 @@ Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050
 - Supports multi-disc games (subfolders containing a `.m3u` playlist)
 - Supports single-disc CUE/BIN games (subfolders containing a `.cue` file)
 - Lists and deletes existing shortcuts
+- Keeps ROM shortcut resume metadata in sync so NextUI can show `X Resume`
 - Auto-installs `SHORTCUT.pak` if it is missing
 - Copies and composites artwork as a fullscreen `bg.png` for each shortcut (optional)
 - Bulk-regenerates or removes artwork for all shortcuts at once
@@ -180,6 +181,12 @@ Tool shortcut structure:
   .media/
     bg.png                   ← generated fullscreen background (optional)
 ```
+
+## Resume Support
+
+ROM shortcuts now install a small managed block into NextUI's `auto.sh` and start a lightweight background helper. The helper mirrors minarch's real resume-slot files onto each shortcut's local `.m3u` name so the main menu can show **X Resume** for ROM shortcuts without modifying NextUI itself.
+
+This applies only to **ROM shortcuts**. Tool shortcuts still launch through `SHORTCUT.pak` and do not participate in NextUI/minarch save-state resume.
 
 ## Artwork / bg.png Generation
 

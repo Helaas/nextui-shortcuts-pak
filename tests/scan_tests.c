@@ -91,6 +91,17 @@ static bool file_contents_equal(const char *path, const char *expected)
     return ok;
 }
 
+static bool file_contains_substring(const char *path, const char *needle)
+{
+    bool ok = false;
+    char *data = read_text_file(path);
+
+    if (!data) return false;
+    ok = strstr(data, needle) != NULL;
+    free(data);
+    return ok;
+}
+
 static bool remove_tree(const char *path)
 {
     struct stat st;
@@ -186,6 +197,357 @@ static const tool_pak *find_tool_by_name(const tool_pak *tools,
             return &tools[i];
     }
     return NULL;
+}
+
+static const shortcut_entry *find_shortcut_by_display(const shortcut_entry *shortcuts,
+                                                      int count,
+                                                      const char *display)
+{
+    for (int i = 0; i < count; i++) {
+        if (strcmp(shortcuts[i].display, display) == 0)
+            return &shortcuts[i];
+    }
+    return NULL;
+}
+
+static bool create_rom_shortcut_fixture(const char *console_name,
+                                        const char *rom_name,
+                                        const char *shortcut_display,
+                                        char *out_folder_name,
+                                        size_t out_folder_name_size)
+{
+    char console_dir[SC_MAX_PATH];
+    char rom_path[SC_MAX_PATH];
+    char shortcut_dir[SC_MAX_PATH];
+    char m3u_path[SC_MAX_PATH];
+    char rel_target[SC_MAX_PATH];
+
+    CHECK(build_folder_name(SC_POS_ALPHA, shortcut_display, "GB",
+                            out_folder_name, (int)out_folder_name_size),
+          "build_folder_name failed for %s", shortcut_display);
+    CHECK(snprintf(console_dir, sizeof(console_dir), "mock_sdcard/Roms/%s",
+                   console_name) < (int)sizeof(console_dir),
+          "console dir path too long");
+    CHECK(make_dir_recursive(console_dir), "create console dir failed");
+    CHECK(snprintf(rom_path, sizeof(rom_path), "%s/%s", console_dir, rom_name) <
+          (int)sizeof(rom_path), "rom path too long");
+    CHECK(touch_file(rom_path), "create rom failed for %s", rom_name);
+
+    CHECK(snprintf(shortcut_dir, sizeof(shortcut_dir), "mock_sdcard/Roms/%s",
+                   out_folder_name) < (int)sizeof(shortcut_dir),
+          "shortcut dir path too long");
+    CHECK(make_dir_recursive(shortcut_dir), "create shortcut dir failed");
+    CHECK(snprintf(m3u_path, sizeof(m3u_path), "%s/%s.m3u", shortcut_dir,
+                   out_folder_name) < (int)sizeof(m3u_path),
+          "shortcut m3u path too long");
+    CHECK(snprintf(rel_target, sizeof(rel_target), "../%s/%s", console_name,
+                   rom_name) < (int)sizeof(rel_target),
+          "shortcut target path too long");
+    CHECK(write_file(m3u_path, rel_target), "write shortcut m3u failed");
+
+    CHECK(snprintf(m3u_path, sizeof(m3u_path), "%s/.shortcut", shortcut_dir) <
+          (int)sizeof(m3u_path), "shortcut marker path too long");
+    CHECK(write_file(m3u_path, shortcut_display), "write shortcut marker failed");
+    return true;
+
+cleanup:
+    return false;
+}
+
+static bool create_tool_shortcut_fixture(const char *tool_name,
+                                         const char *shortcut_display)
+{
+    char tool_dir[SC_MAX_PATH];
+    char shortcut_dir[SC_MAX_PATH];
+    char folder_name[SC_MAX_NAME];
+    char path[SC_MAX_PATH];
+
+    CHECK(snprintf(tool_dir, sizeof(tool_dir),
+                   "mock_sdcard/Tools/tg5040/%s.pak", tool_name) <
+          (int)sizeof(tool_dir), "tool dir path too long");
+    CHECK(make_dir_recursive(tool_dir), "create tool dir failed");
+
+    CHECK(build_folder_name(SC_POS_ALPHA, shortcut_display, BRIDGE_EMU_TAG,
+                            folder_name, sizeof(folder_name)),
+          "build tool shortcut folder name failed");
+    CHECK(snprintf(shortcut_dir, sizeof(shortcut_dir), "mock_sdcard/Roms/%s",
+                   folder_name) < (int)sizeof(shortcut_dir),
+          "tool shortcut dir path too long");
+    CHECK(make_dir_recursive(shortcut_dir), "create tool shortcut dir failed");
+
+    CHECK(snprintf(path, sizeof(path), "%s/%s.m3u", shortcut_dir, folder_name) <
+          (int)sizeof(path), "tool shortcut m3u path too long");
+    CHECK(write_file(path, "target"), "write tool shortcut m3u failed");
+    CHECK(snprintf(path, sizeof(path), "%s/target", shortcut_dir) <
+          (int)sizeof(path), "tool shortcut target path too long");
+    CHECK(write_file(path, tool_dir), "write tool shortcut target failed");
+    CHECK(snprintf(path, sizeof(path), "%s/.shortcut", shortcut_dir) <
+          (int)sizeof(path), "tool shortcut marker path too long");
+    CHECK(write_file(path, shortcut_display), "write tool shortcut marker failed");
+    return true;
+
+cleanup:
+    return false;
+}
+
+static bool test_resume_sync_aliases_rom_shortcuts_only(void)
+{
+    test_env env = {0};
+    char shortcut_folder[SC_MAX_NAME];
+    char real_slot[SC_MAX_PATH];
+    char alias_slot[SC_MAX_PATH];
+    bool ok = false;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Game Boy (GB)", "Tetris.gb",
+                                      "Shortcut Tetris",
+                                      shortcut_folder, sizeof(shortcut_folder)),
+          "create rom shortcut fixture failed");
+    CHECK(create_tool_shortcut_fixture("Retroarch", "Shortcut Tool"),
+          "create tool shortcut fixture failed");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GB"),
+          "create minui dir failed");
+
+    CHECK(snprintf(real_slot, sizeof(real_slot),
+                   "mock_sdcard/.userdata/shared/.minui/GB/Tetris.gb.txt") <
+          (int)sizeof(real_slot), "real slot path too long");
+    CHECK(write_file(real_slot, "3"), "write real slot failed");
+
+    CHECK(resume_sync_once() == 0, "resume_sync_once failed");
+
+    CHECK(snprintf(alias_slot, sizeof(alias_slot),
+                   "mock_sdcard/.userdata/shared/.minui/GB/%s.m3u.txt",
+                   shortcut_folder) < (int)sizeof(alias_slot),
+          "alias slot path too long");
+    CHECK(file_contents_equal(alias_slot, "3"),
+          "alias slot was not mirrored");
+
+    CHECK(!path_exists("mock_sdcard/.userdata/shared/.minui/SHORTCUT/Shortcut Tool (SHORTCUT).m3u.txt"),
+          "tool shortcut should not create alias slot");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_resume_sync_autostart_block_is_idempotent(void)
+{
+    test_env env = {0};
+    char auto_path[SC_MAX_PATH];
+    char *contents = NULL;
+    bool ok = false;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/tg5040"),
+          "create device userdata dir failed");
+    CHECK(write_file("mock_sdcard/.userdata/tg5040/auto.sh",
+                     "#!/bin/sh\necho existing\n"),
+          "seed auto.sh failed");
+
+    ensure_resume_sync_autostart();
+    ensure_resume_sync_autostart();
+
+    CHECK(snprintf(auto_path, sizeof(auto_path),
+                   "mock_sdcard/.userdata/tg5040/auto.sh") <
+          (int)sizeof(auto_path), "auto path too long");
+    contents = read_text_file(auto_path);
+    CHECK(contents != NULL, "read auto.sh failed");
+    CHECK(strstr(contents, "echo existing") != NULL,
+          "auto.sh should preserve existing content");
+    CHECK(strstr(contents, "# >>> shortcuts-resume-sync-managed >>>\n") != NULL,
+          "auto.sh block missing");
+    CHECK(strstr(strstr(contents, "# >>> shortcuts-resume-sync-managed >>>\n") + 1,
+                 "# >>> shortcuts-resume-sync-managed >>>\n") == NULL,
+          "auto.sh block duplicated");
+    CHECK(strstr(contents, "--resume-sync-daemon") != NULL,
+          "auto.sh block missing helper command");
+
+    ok = true;
+
+cleanup:
+    free(contents);
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_rename_shortcut_keeps_resume_aliases_working(void)
+{
+    test_env env = {0};
+    char original_folder[SC_MAX_NAME];
+    char alias_old[SC_MAX_PATH];
+    char alias_new[SC_MAX_PATH];
+    char real_slot[SC_MAX_PATH];
+    char manifest_path[SC_MAX_PATH];
+    shortcut_entry *shortcuts = NULL;
+    const shortcut_entry *shortcut = NULL;
+    int count = 0;
+    bool ok = false;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Game Boy (GB)", "Metroid.gb",
+                                      "Metroid Shortcut",
+                                      original_folder, sizeof(original_folder)),
+          "create rom shortcut fixture failed");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GB"),
+          "create minui dir failed");
+    CHECK(snprintf(real_slot, sizeof(real_slot),
+                   "mock_sdcard/.userdata/shared/.minui/GB/Metroid.gb.txt") <
+          (int)sizeof(real_slot), "real slot path too long");
+    CHECK(snprintf(manifest_path, sizeof(manifest_path),
+                   "mock_sdcard/.userdata/shared/Shortcuts/resume_aliases.tsv") <
+          (int)sizeof(manifest_path), "manifest path too long");
+    CHECK(write_file(real_slot, "5"), "write initial real slot failed");
+    CHECK(resume_sync_once() == 0, "initial resume sync failed");
+
+    CHECK(snprintf(alias_old, sizeof(alias_old),
+                   "mock_sdcard/.userdata/shared/.minui/GB/%s.m3u.txt",
+                   original_folder) < (int)sizeof(alias_old),
+          "old alias path too long");
+    CHECK(file_contents_equal(alias_old, "5"),
+          "old alias missing before rename");
+
+    CHECK(scan_shortcuts(&shortcuts, &count) == 0, "scan_shortcuts failed");
+    shortcut = find_shortcut_by_display(shortcuts, count, "Metroid Shortcut");
+    CHECK(shortcut != NULL, "could not find shortcut to rename");
+    CHECK(rename_shortcut(shortcut, "Renamed Metroid") == 0,
+          "rename_shortcut failed");
+    free(shortcuts);
+    shortcuts = NULL;
+
+    CHECK(!path_exists(alias_old), "old alias should be removed after rename");
+
+    CHECK(scan_shortcuts(&shortcuts, &count) == 0,
+          "scan_shortcuts after rename failed");
+    shortcut = find_shortcut_by_display(shortcuts, count, "Renamed Metroid");
+    CHECK(shortcut != NULL, "renamed shortcut missing");
+    CHECK(snprintf(alias_new, sizeof(alias_new),
+                   "mock_sdcard/.userdata/shared/.minui/GB/%s.m3u.txt",
+                   shortcut->name) < (int)sizeof(alias_new),
+          "new alias path too long");
+    CHECK(file_contents_equal(alias_new, "5"),
+          "new alias missing immediately after rename");
+    CHECK(write_file(real_slot, "7"), "update real slot after rename failed");
+    CHECK(resume_sync_once() == 0, "resume sync after rename failed");
+    CHECK(file_contents_equal(alias_new, "7"),
+          "new alias should track later resume updates");
+    CHECK(!file_contains_substring(manifest_path, alias_old),
+          "manifest should not contain old alias after rename");
+    CHECK(file_contains_substring(manifest_path, alias_new),
+          "manifest should contain new alias after rename");
+
+    ok = true;
+
+cleanup:
+    free(shortcuts);
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_remove_shortcut_cleans_resume_aliases(void)
+{
+    test_env env = {0};
+    char original_folder[SC_MAX_NAME];
+    char alias_path[SC_MAX_PATH];
+    char real_slot[SC_MAX_PATH];
+    char manifest_path[SC_MAX_PATH];
+    shortcut_entry *shortcuts = NULL;
+    const shortcut_entry *shortcut = NULL;
+    int count = 0;
+    bool ok = false;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Game Boy (GB)", "Metroid.gb",
+                                      "Metroid Shortcut",
+                                      original_folder, sizeof(original_folder)),
+          "create rom shortcut fixture failed");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GB"),
+          "create minui dir failed");
+    CHECK(snprintf(real_slot, sizeof(real_slot),
+                   "mock_sdcard/.userdata/shared/.minui/GB/Metroid.gb.txt") <
+          (int)sizeof(real_slot), "real slot path too long");
+    CHECK(snprintf(alias_path, sizeof(alias_path),
+                   "mock_sdcard/.userdata/shared/.minui/GB/%s.m3u.txt",
+                   original_folder) < (int)sizeof(alias_path),
+          "alias path too long");
+    CHECK(snprintf(manifest_path, sizeof(manifest_path),
+                   "mock_sdcard/.userdata/shared/Shortcuts/resume_aliases.tsv") <
+          (int)sizeof(manifest_path), "manifest path too long");
+    CHECK(write_file(real_slot, "5"), "write real slot failed");
+    CHECK(resume_sync_once() == 0, "initial resume sync failed");
+    CHECK(file_contents_equal(alias_path, "5"), "alias missing before delete");
+    CHECK(file_contains_substring(manifest_path, alias_path),
+          "manifest should contain alias before delete");
+
+    CHECK(scan_shortcuts(&shortcuts, &count) == 0, "scan_shortcuts failed");
+    shortcut = find_shortcut_by_display(shortcuts, count, "Metroid Shortcut");
+    CHECK(shortcut != NULL, "could not find shortcut to remove");
+    CHECK(remove_shortcut(shortcut->path) == 0, "remove_shortcut failed");
+
+    CHECK(!path_exists(alias_path), "alias should be removed after delete");
+    CHECK(!file_contains_substring(manifest_path, alias_path),
+          "manifest should not contain alias after delete");
+
+    ok = true;
+
+cleanup:
+    free(shortcuts);
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_external_shortcut_delete_cleans_resume_aliases(void)
+{
+    test_env env = {0};
+    char original_folder[SC_MAX_NAME];
+    char alias_path[SC_MAX_PATH];
+    char real_slot[SC_MAX_PATH];
+    char manifest_path[SC_MAX_PATH];
+    shortcut_entry *shortcuts = NULL;
+    const shortcut_entry *shortcut = NULL;
+    int count = 0;
+    bool ok = false;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Game Boy (GB)", "Metroid.gb",
+                                      "Metroid Shortcut",
+                                      original_folder, sizeof(original_folder)),
+          "create rom shortcut fixture failed");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GB"),
+          "create minui dir failed");
+    CHECK(snprintf(real_slot, sizeof(real_slot),
+                   "mock_sdcard/.userdata/shared/.minui/GB/Metroid.gb.txt") <
+          (int)sizeof(real_slot), "real slot path too long");
+    CHECK(snprintf(alias_path, sizeof(alias_path),
+                   "mock_sdcard/.userdata/shared/.minui/GB/%s.m3u.txt",
+                   original_folder) < (int)sizeof(alias_path),
+          "alias path too long");
+    CHECK(snprintf(manifest_path, sizeof(manifest_path),
+                   "mock_sdcard/.userdata/shared/Shortcuts/resume_aliases.tsv") <
+          (int)sizeof(manifest_path), "manifest path too long");
+    CHECK(write_file(real_slot, "5"), "write real slot failed");
+    CHECK(resume_sync_once() == 0, "initial resume sync failed");
+    CHECK(file_contains_substring(manifest_path, alias_path),
+          "manifest should contain alias before external delete");
+
+    CHECK(scan_shortcuts(&shortcuts, &count) == 0, "scan_shortcuts failed");
+    shortcut = find_shortcut_by_display(shortcuts, count, "Metroid Shortcut");
+    CHECK(shortcut != NULL, "could not find shortcut to delete externally");
+    CHECK(remove_tree(shortcut->path), "external delete of shortcut folder failed");
+    CHECK(resume_sync_once() == 0, "resume sync after external delete failed");
+
+    CHECK(!path_exists(alias_path),
+          "alias should be removed after external shortcut delete");
+    CHECK(!file_contains_substring(manifest_path, alias_path),
+          "manifest should not contain alias after external delete");
+
+    ok = true;
+
+cleanup:
+    free(shortcuts);
+    teardown_test_env(&env);
+    return ok;
 }
 
 static bool test_sidecar_only_console_is_hidden(void)
@@ -783,6 +1145,11 @@ int main(void)
         { "symlinked entries are skipped", test_symlinked_entries_are_skipped },
         { "ensure_dir_exists rejects file collisions", test_ensure_dir_exists_rejects_file_collisions },
         { "rename shortcut updates layout for all positions", test_rename_shortcut_updates_layout_for_all_positions },
+        { "resume sync aliases rom shortcuts only", test_resume_sync_aliases_rom_shortcuts_only },
+        { "resume sync auto.sh block is idempotent", test_resume_sync_autostart_block_is_idempotent },
+        { "rename shortcut keeps resume aliases working", test_rename_shortcut_keeps_resume_aliases_working },
+        { "remove shortcut cleans resume aliases", test_remove_shortcut_cleans_resume_aliases },
+        { "external shortcut delete cleans resume aliases", test_external_shortcut_delete_cleans_resume_aliases },
     };
     int failures = 0;
 

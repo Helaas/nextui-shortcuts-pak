@@ -13,7 +13,7 @@ STAGING_DIR := $(BUILD_DIR)/staging
 TEST_BUILD_DIR := $(BUILD_DIR)/tests
 TEST_BIN := $(TEST_BUILD_DIR)/scan_tests
 SRC_FILES := $(shell find src -name '*.c' -print | sort)
-TEST_SRC_FILES := tests/scan_tests.c tests/test_stubs.c src/device.c src/cjson/cjson.c
+TEST_SRC_FILES := tests/scan_tests.c tests/test_stubs.c src/device.c src/resume_sync.c src/cjson/cjson.c
 
 TG5040_TOOLCHAIN := ghcr.io/loveretro/tg5040-toolchain:latest
 TG5050_TOOLCHAIN := ghcr.io/loveretro/tg5050-toolchain:latest

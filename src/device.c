@@ -1350,6 +1350,8 @@ int create_rom_shortcut(const char *display_name, const char *tag,
     }
 
     ap_log("create_rom_shortcut: created folder=%s", folder_path);
+    if (resume_sync_once() != 0)
+        ap_log("create_rom_shortcut: resume sync failed for %s", folder_path);
     return 0;
 }
 
@@ -1414,15 +1416,21 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
 
 int remove_shortcut(const char *shortcut_path)
 {
+    int rc;
+
     ap_log("remove_shortcut: path=%s", shortcut_path);
 
     struct stat st;
     if (lstat(shortcut_path, &st) != 0)
         return -1;
     if (S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode))
-        return unlink(shortcut_path);
+        rc = unlink(shortcut_path);
+    else
+        rc = rmdir_recursive(shortcut_path);
 
-    return rmdir_recursive(shortcut_path);
+    if (rc == 0 && resume_sync_once() != 0)
+        ap_log("remove_shortcut: resume sync failed for %s", shortcut_path);
+    return rc;
 }
 
 bool shortcut_exists(const char *display_name, const char *tag)
@@ -1509,6 +1517,8 @@ int rename_shortcut(const shortcut_entry *sc, const char *new_display)
     }
 
     ap_log("rename_shortcut: done -> %s", new_folder_path);
+    if (resume_sync_once() != 0)
+        ap_log("rename_shortcut: resume sync failed for %s", new_folder_path);
     return 0;
 }
 

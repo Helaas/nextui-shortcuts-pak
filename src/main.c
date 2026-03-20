@@ -40,8 +40,12 @@ static void run_app(void)
 
 int main(int argc, char *argv[])
 {
-    (void)argc;
-    (void)argv;
+    if (argc > 1) {
+        if (strcmp(argv[1], "--resume-sync-daemon") == 0)
+            return resume_sync_daemon();
+        if (strcmp(argv[1], "--resume-sync-once") == 0)
+            return resume_sync_once() == 0 ? 0 : 1;
+    }
 
     const char *dev = getenv("DEVICE");
     g_is_brick = (dev && strcasecmp(dev, "brick") == 0);
@@ -63,6 +67,12 @@ int main(int argc, char *argv[])
     ap_log("startup: platform=%s is_brick=%d", AP_PLATFORM_NAME, g_is_brick);
 
     ensure_bridge_emu();
+    if (AP_PLATFORM_IS_DEVICE) {
+        ensure_resume_sync_autostart();
+        if (resume_sync_once() != 0)
+            ap_log("startup: initial resume alias sync failed");
+        start_resume_sync_helper(argv[0]);
+    }
     run_app();
 
     ap_quit();
