@@ -832,6 +832,7 @@ void manage_media_flow(void)
 void show_settings_screen(void)
 {
     app_settings settings = load_settings();
+    const bool had_resume_sync_daemon = settings.resume_sync_daemon;
 
     /* Option: Copy artwork */
     ap_option copy_opts[] = {
@@ -846,6 +847,11 @@ void show_settings_screen(void)
     };
     /* Option: Show hidden */
     ap_option hidden_opts[] = {
+        { .label = "Off", .value = "0" },
+        { .label = "On",  .value = "1" },
+    };
+    /* Option: Background resume daemon */
+    ap_option daemon_opts[] = {
         { .label = "Off", .value = "0" },
         { .label = "On",  .value = "1" },
     };
@@ -869,6 +875,12 @@ void show_settings_screen(void)
             .option_count = 2,
             .selected_option = settings.show_hidden ? 1 : 0,
         },
+        {
+            .label = "Background resume sync daemon",
+            .options = daemon_opts,
+            .option_count = 2,
+            .selected_option = settings.resume_sync_daemon ? 1 : 0,
+        },
     };
 
     ap_footer_item footer[] = {
@@ -880,11 +892,11 @@ void show_settings_screen(void)
     ap_options_list_opts opts = {
         .title = "Settings",
         .items = items,
-        .item_count = 3,
+        .item_count = 4,
         .footer = footer,
         .footer_count = 3,
         .confirm_button = AP_BTN_A,
-        .help_text = "Empty and sidecar-only ROM folders stay hidden.",
+        .help_text = "Disable the daemon for performance testing.",
         .label_font = ap_get_font(AP_FONT_MEDIUM),
     };
 
@@ -896,11 +908,25 @@ void show_settings_screen(void)
     settings.copy_artwork = (result.items[0].selected_option == 1);
     settings.artwork_mode = (art_mode)result.items[1].selected_option;
     settings.show_hidden  = (result.items[2].selected_option == 1);
+    settings.resume_sync_daemon = (result.items[3].selected_option == 1);
 
-    ap_log("ui: settings saving: copy_artwork=%d artwork_mode=%d show_hidden=%d",
-           settings.copy_artwork, settings.artwork_mode, settings.show_hidden);
+    ap_log("ui: settings saving: copy_artwork=%d artwork_mode=%d show_hidden=%d "
+           "resume_sync_daemon=%d",
+           settings.copy_artwork, settings.artwork_mode, settings.show_hidden,
+           settings.resume_sync_daemon);
     if (save_settings(&settings) != 0) {
         ap_log("ui: settings save failed");
         show_error("Could not save settings.");
+        return;
+    }
+
+    if (AP_PLATFORM_IS_DEVICE) {
+        if (set_resume_sync_autostart_enabled(settings.resume_sync_daemon) != 0)
+            ap_log("ui: failed to update resume sync auto.sh");
+        if (settings.resume_sync_daemon) {
+            if (!had_resume_sync_daemon && resume_sync_once() != 0)
+                ap_log("ui: resume sync failed after enabling daemon");
+            start_resume_sync_helper();
+        }
     }
 }

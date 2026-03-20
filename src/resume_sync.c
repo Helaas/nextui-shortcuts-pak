@@ -677,48 +677,54 @@ static void handle_resume_sync_signal(int sig)
     g_resume_sync_stop = 1;
 }
 
-static int upsert_auto_block(void)
+static int update_auto_block(bool enabled)
 {
     char auto_path[SC_MAX_PATH * 2];
     char helper_path[SC_MAX_PATH * 2];
     char log_dir[SC_MAX_PATH * 2];
     char log_file[SC_MAX_PATH * 2];
     char block[(SC_MAX_PATH * 8) + 1024];
+    const char *replacement = NULL;
     char *existing = NULL;
     char *begin;
     char *end;
     char *new_content = NULL;
     size_t existing_len;
-    size_t block_len;
+    size_t replacement_len = 0;
     size_t prefix_len;
     size_t suffix_len;
     size_t extra_newline = 0;
     int rc = -1;
 
-    if (!build_auto_path(auto_path, sizeof(auto_path)) ||
-        !build_helper_path(helper_path, sizeof(helper_path)) ||
-        !build_log_dir_path(log_dir, sizeof(log_dir)) ||
-        !build_log_file_path(log_file, sizeof(log_file)))
+    if (!build_auto_path(auto_path, sizeof(auto_path)))
         return -1;
 
-    block_len = (size_t)snprintf(block, sizeof(block),
-        "%s"
-        "SHORTCUTS_RESUME_HELPER=\"%s\"\n"
-        "SHORTCUTS_RESUME_LOG_DIR=\"%s\"\n"
-        "SHORTCUTS_RESUME_LOG_FILE=\"%s\"\n"
-        "if [ -x \"$SHORTCUTS_RESUME_HELPER\" ]; then\n"
-        "    mkdir -p \"$SHORTCUTS_RESUME_LOG_DIR\" > /dev/null 2>&1 || true\n"
-        "    \"$SHORTCUTS_RESUME_HELPER\" --resume-sync-daemon >>"
-        "\"$SHORTCUTS_RESUME_LOG_FILE\" 2>&1 &\n"
-        "fi\n"
-        "%s",
-        RESUME_SYNC_AUTO_MARKER_BEGIN,
-        helper_path,
-        log_dir,
-        log_file,
-        RESUME_SYNC_AUTO_MARKER_END);
-    if (block_len >= sizeof(block))
-        return -1;
+    if (enabled) {
+        if (!build_helper_path(helper_path, sizeof(helper_path)) ||
+            !build_log_dir_path(log_dir, sizeof(log_dir)) ||
+            !build_log_file_path(log_file, sizeof(log_file)))
+            return -1;
+
+        replacement_len = (size_t)snprintf(block, sizeof(block),
+            "%s"
+            "SHORTCUTS_RESUME_HELPER=\"%s\"\n"
+            "SHORTCUTS_RESUME_LOG_DIR=\"%s\"\n"
+            "SHORTCUTS_RESUME_LOG_FILE=\"%s\"\n"
+            "if [ -x \"$SHORTCUTS_RESUME_HELPER\" ]; then\n"
+            "    mkdir -p \"$SHORTCUTS_RESUME_LOG_DIR\" > /dev/null 2>&1 || true\n"
+            "    \"$SHORTCUTS_RESUME_HELPER\" --resume-sync-daemon >>"
+            "\"$SHORTCUTS_RESUME_LOG_FILE\" 2>&1 &\n"
+            "fi\n"
+            "%s",
+            RESUME_SYNC_AUTO_MARKER_BEGIN,
+            helper_path,
+            log_dir,
+            log_file,
+            RESUME_SYNC_AUTO_MARKER_END);
+        if (replacement_len >= sizeof(block))
+            return -1;
+        replacement = block;
+    }
 
     existing = read_text_file_or_empty_local(auto_path, &existing_len);
     if (!existing)
@@ -739,27 +745,35 @@ static int upsert_auto_block(void)
         prefix_len = (size_t)(begin - existing);
         suffix_len = 0;
     } else {
+        if (!enabled) {
+            rc = 0;
+            goto cleanup;
+        }
         prefix_len = existing_len;
         suffix_len = 0;
         if (existing_len > 0 && existing[existing_len - 1] != '\n')
             extra_newline = 1;
     }
 
-    new_content = malloc(prefix_len + extra_newline + block_len + suffix_len + 1);
+    new_content = malloc(prefix_len + extra_newline + replacement_len +
+                         suffix_len + 1);
     if (!new_content)
         goto cleanup;
 
     memcpy(new_content, existing, prefix_len);
     if (extra_newline)
         new_content[prefix_len] = '\n';
-    memcpy(new_content + prefix_len + extra_newline, block, block_len);
+    if (replacement_len > 0)
+        memcpy(new_content + prefix_len + extra_newline, replacement,
+               replacement_len);
     if (suffix_len > 0)
-        memcpy(new_content + prefix_len + extra_newline + block_len,
+        memcpy(new_content + prefix_len + extra_newline + replacement_len,
                existing + existing_len - suffix_len, suffix_len);
-    new_content[prefix_len + extra_newline + block_len + suffix_len] = '\0';
+    new_content[prefix_len + extra_newline + replacement_len + suffix_len] = '\0';
 
     rc = write_text_file_atomic_local(auto_path, new_content,
-                                      prefix_len + extra_newline + block_len +
+                                      prefix_len + extra_newline +
+                                      replacement_len +
                                       suffix_len);
     if (rc == 0)
         (void)chmod(auto_path, 0755);
@@ -770,22 +784,28 @@ cleanup:
     return rc;
 }
 
+int set_resume_sync_autostart_enabled(bool enabled)
+{
+    return update_auto_block(enabled);
+}
+
 void ensure_resume_sync_autostart(void)
 {
-    if (upsert_auto_block() != 0)
+    if (set_resume_sync_autostart_enabled(true) != 0)
         ap_log("resume_sync: failed to update auto.sh");
 }
 
-void start_resume_sync_helper(const char *argv0)
+void start_resume_sync_helper(void)
 {
 #if defined(PLATFORM_MAC)
-    (void)argv0;
     return;
 #else
+    char helper_path[SC_MAX_PATH * 2];
     pid_t pid;
     int devnull;
 
-    if (!argv0 || argv0[0] == '\0')
+    if (!build_helper_path(helper_path, sizeof(helper_path)) ||
+        access(helper_path, X_OK) != 0)
         return;
 
     pid = fork();
@@ -803,7 +823,7 @@ void start_resume_sync_helper(const char *argv0)
             close(devnull);
     }
 
-    execl(argv0, argv0, "--resume-sync-daemon", (char *)NULL);
+    execl(helper_path, helper_path, "--resume-sync-daemon", (char *)NULL);
     _exit(127);
 #endif
 }
@@ -828,6 +848,7 @@ int resume_sync_once(void)
 
 int resume_sync_daemon(void)
 {
+    app_settings settings;
     int daemon_lock_fd;
 
     daemon_lock_fd = open_lock_fd(RESUME_SYNC_DAEMON_LOCK);
@@ -840,8 +861,13 @@ int resume_sync_daemon(void)
 
     signal(SIGINT, handle_resume_sync_signal);
     signal(SIGTERM, handle_resume_sync_signal);
+    g_resume_sync_stop = 0;
 
     while (!g_resume_sync_stop) {
+        settings = load_settings();
+        if (!settings.resume_sync_daemon)
+            break;
+
         if (resume_sync_once() != 0)
             ap_log("resume_sync: sync iteration failed");
 

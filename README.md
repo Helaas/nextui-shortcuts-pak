@@ -72,6 +72,7 @@ Bulk artwork operations for all shortcuts:
 | Copy artwork when available | Off / On | **On** |
 | Artwork mode | Art on Black background / Art on Main menu Wallpaper / Fallback to wallpaper | **Art on Main menu Wallpaper** |
 | Show hidden/disabled ROMs | Off / On | **Off** |
+| Background resume sync daemon | Off / On | **On** |
 
 #### Copy artwork when available
 
@@ -96,6 +97,24 @@ When **Off** (default), the ROM and console pickers hide:
 - ROM folders whose contents are only manuals, artwork, metadata, saves, previews, or other non-ROM sidecars
 
 Turn this **On** to make hidden and `.disabled` ROMs visible and selectable. Empty folders and sidecar-only folders still stay hidden because they do not contain any selectable ROMs. Mac system folders (`.DS_Store`, `.Spotlight-V100`, etc.) are always hidden regardless of this setting.
+
+#### Background resume sync daemon
+
+When **On** (default), Shortcuts starts a small background helper each time your device boots. In plain terms, this means a tiny helper process keeps running quietly in the background while the device is on.
+
+That helper exists for one reason: to keep **X Resume** working reliably on ROM shortcuts. When you save or update a state while playing, the helper notices that change and refreshes the shortcut's resume info in the menu, so the shortcut can offer **X Resume** again when you return to NextUI.
+
+For most users, you should leave this **On**. The helper is lightweight and only checks for resume updates periodically, so the performance impact should be very small in normal use.
+
+You might want to turn it **Off** if:
+- You are doing performance or battery testing and want as little background activity as possible
+- You are troubleshooting and want to rule out the helper as a variable
+
+If you turn it **Off**:
+- ROM shortcuts still launch normally
+- Existing save states are not deleted
+- Shortcut resume info is only refreshed when you open the Shortcuts pak itself
+- Because of that, **X Resume** on a shortcut may not update immediately after playing until you open Shortcuts again
 
 ## Five Game Handheld Mode
 
@@ -184,7 +203,7 @@ Tool shortcut structure:
 
 ## Resume Support
 
-ROM shortcuts now install a small managed block into NextUI's `auto.sh` and start a lightweight background helper. The helper mirrors minarch's real resume-slot files onto each shortcut's local `.m3u` name so the main menu can show **X Resume** for ROM shortcuts without modifying NextUI itself.
+ROM shortcuts can install a small managed block into NextUI's `auto.sh` and start a lightweight background helper. The helper mirrors minarch's real resume-slot files onto each shortcut's local `.m3u` name so the main menu can show **X Resume** for ROM shortcuts without modifying NextUI itself. The helper is enabled by default and can be disabled in **Settings**.
 
 This applies only to **ROM shortcuts**. Tool shortcuts still launch through `SHORTCUT.pak` and do not participate in NextUI/minarch save-state resume.
 

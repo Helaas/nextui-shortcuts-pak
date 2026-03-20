@@ -40,6 +40,8 @@ static void run_app(void)
 
 int main(int argc, char *argv[])
 {
+    app_settings settings;
+
     if (argc > 1) {
         if (strcmp(argv[1], "--resume-sync-daemon") == 0)
             return resume_sync_daemon();
@@ -67,11 +69,14 @@ int main(int argc, char *argv[])
     ap_log("startup: platform=%s is_brick=%d", AP_PLATFORM_NAME, g_is_brick);
 
     ensure_bridge_emu();
+    settings = load_settings();
     if (AP_PLATFORM_IS_DEVICE) {
-        ensure_resume_sync_autostart();
+        if (set_resume_sync_autostart_enabled(settings.resume_sync_daemon) != 0)
+            ap_log("startup: failed to update resume sync auto.sh");
         if (resume_sync_once() != 0)
             ap_log("startup: initial resume alias sync failed");
-        start_resume_sync_helper(argv[0]);
+        if (settings.resume_sync_daemon)
+            start_resume_sync_helper();
     }
     run_app();
 

@@ -332,6 +332,55 @@ cleanup:
     return ok;
 }
 
+static bool test_settings_default_resume_sync_daemon_enabled(void)
+{
+    test_env env = {0};
+    app_settings settings;
+    bool ok = false;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    settings = load_settings();
+    CHECK(settings.resume_sync_daemon,
+          "resume sync daemon should default to enabled");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_settings_persist_resume_sync_daemon_toggle(void)
+{
+    test_env env = {0};
+    app_settings settings;
+    app_settings loaded;
+    bool ok = false;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    settings = load_settings();
+    settings.copy_artwork = false;
+    settings.artwork_mode = ART_MODE_BLACK;
+    settings.show_hidden = true;
+    settings.resume_sync_daemon = false;
+
+    CHECK(save_settings(&settings) == 0, "save_settings failed");
+
+    loaded = load_settings();
+    CHECK(!loaded.copy_artwork, "copy_artwork should persist");
+    CHECK(loaded.artwork_mode == ART_MODE_BLACK,
+          "artwork_mode should persist");
+    CHECK(loaded.show_hidden, "show_hidden should persist");
+    CHECK(!loaded.resume_sync_daemon,
+          "resume_sync_daemon should persist as disabled");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
 static bool test_resume_sync_autostart_block_is_idempotent(void)
 {
     test_env env = {0};
@@ -363,6 +412,45 @@ static bool test_resume_sync_autostart_block_is_idempotent(void)
           "auto.sh block duplicated");
     CHECK(strstr(contents, "--resume-sync-daemon") != NULL,
           "auto.sh block missing helper command");
+
+    ok = true;
+
+cleanup:
+    free(contents);
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_resume_sync_autostart_block_can_be_removed(void)
+{
+    test_env env = {0};
+    char auto_path[SC_MAX_PATH];
+    char *contents = NULL;
+    bool ok = false;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/tg5040"),
+          "create device userdata dir failed");
+    CHECK(write_file("mock_sdcard/.userdata/tg5040/auto.sh",
+                     "#!/bin/sh\necho existing\n"),
+          "seed auto.sh failed");
+
+    CHECK(set_resume_sync_autostart_enabled(true) == 0,
+          "enable auto.sh block failed");
+    CHECK(set_resume_sync_autostart_enabled(false) == 0,
+          "disable auto.sh block failed");
+
+    CHECK(snprintf(auto_path, sizeof(auto_path),
+                   "mock_sdcard/.userdata/tg5040/auto.sh") <
+          (int)sizeof(auto_path), "auto path too long");
+    contents = read_text_file(auto_path);
+    CHECK(contents != NULL, "read auto.sh after removal failed");
+    CHECK(strstr(contents, "echo existing") != NULL,
+          "auto.sh should preserve unrelated content");
+    CHECK(strstr(contents, "# >>> shortcuts-resume-sync-managed >>>") == NULL,
+          "managed block should be removed when daemon is disabled");
+    CHECK(strstr(contents, "--resume-sync-daemon") == NULL,
+          "helper command should be removed when daemon is disabled");
 
     ok = true;
 
@@ -1146,7 +1234,10 @@ int main(void)
         { "ensure_dir_exists rejects file collisions", test_ensure_dir_exists_rejects_file_collisions },
         { "rename shortcut updates layout for all positions", test_rename_shortcut_updates_layout_for_all_positions },
         { "resume sync aliases rom shortcuts only", test_resume_sync_aliases_rom_shortcuts_only },
+        { "settings default resume sync daemon enabled", test_settings_default_resume_sync_daemon_enabled },
+        { "settings persist resume sync daemon toggle", test_settings_persist_resume_sync_daemon_toggle },
         { "resume sync auto.sh block is idempotent", test_resume_sync_autostart_block_is_idempotent },
+        { "resume sync auto.sh block can be removed", test_resume_sync_autostart_block_can_be_removed },
         { "rename shortcut keeps resume aliases working", test_rename_shortcut_keeps_resume_aliases_working },
         { "remove shortcut cleans resume aliases", test_remove_shortcut_cleans_resume_aliases },
         { "external shortcut delete cleans resume aliases", test_external_shortcut_delete_cleans_resume_aliases },

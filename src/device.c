@@ -680,7 +680,7 @@ void get_screen_dimensions(int *w, int *h)
 app_settings load_settings(void)
 {
     app_settings s = { .copy_artwork = true, .artwork_mode = ART_MODE_WALLPAPER,
-                       .show_hidden = false };
+                       .show_hidden = false, .resume_sync_daemon = true };
     char path[SC_MAX_PATH];
     get_settings_path(path, sizeof(path));
     char *data = read_text_file(path);
@@ -702,6 +702,9 @@ app_settings load_settings(void)
 
     cJSON *sh = cJSON_GetObjectItem(json, "show_hidden");
     if (cJSON_IsBool(sh)) s.show_hidden = cJSON_IsTrue(sh);
+
+    cJSON *rsd = cJSON_GetObjectItem(json, "resume_sync_daemon");
+    if (cJSON_IsBool(rsd)) s.resume_sync_daemon = cJSON_IsTrue(rsd);
 
     cJSON_Delete(json);
     return s;
@@ -726,6 +729,7 @@ int save_settings(const app_settings *s)
     cJSON_AddBoolToObject(json, "copy_artwork", s->copy_artwork);
     cJSON_AddNumberToObject(json, "artwork_mode", (int)s->artwork_mode);
     cJSON_AddBoolToObject(json, "show_hidden", s->show_hidden);
+    cJSON_AddBoolToObject(json, "resume_sync_daemon", s->resume_sync_daemon);
 
     char *str = cJSON_PrintUnformatted(json);
     cJSON_Delete(json);

@@ -65,6 +65,7 @@ typedef struct {
     bool     copy_artwork;   /* Default: true */
     art_mode artwork_mode;   /* Default: ART_MODE_WALLPAPER */
     bool     show_hidden;    /* Default: false */
+    bool     resume_sync_daemon; /* Default: true */
 } app_settings;
 
 typedef struct {
@@ -180,8 +181,9 @@ void ensure_bridge_emu(void);
 
 /* ── resume_sync.c ─────────────────────────────────────────────── */
 
+int set_resume_sync_autostart_enabled(bool enabled);
 void ensure_resume_sync_autostart(void);
-void start_resume_sync_helper(const char *argv0);
+void start_resume_sync_helper(void);
 int resume_sync_once(void);
 int resume_sync_daemon(void);
 
