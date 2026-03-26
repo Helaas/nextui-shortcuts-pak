@@ -7,6 +7,7 @@ SHELL := /bin/bash
 APP_NAME := shortcuts
 PAK_NAME := Shortcuts
 APOSTROPHE_DIR := third_party/apostrophe
+APOSTROPHE_BRANCH := main
 BUILD_DIR := build
 DIST_DIR := $(BUILD_DIR)/release
 STAGING_DIR := $(BUILD_DIR)/staging
@@ -24,13 +25,25 @@ COMMON_INCLUDES := -I$(APOSTROPHE_DIR)/include -Isrc
 
 .PHONY: all native mac run-mac run-native tg5040 tg5050 my355 \
 	test-native package package-tg5040 package-tg5050 package-my355 do-package \
-	deploy deploy-platform clean help
+	deploy deploy-platform clean help update-apostrophe
 
 # ── Default target ──────────────────────────────────────────
 
 native: mac
 run-native: run-mac
 all: tg5040 tg5050 my355
+
+# ── Submodule auto-init ────────────────────────────────────
+
+$(APOSTROPHE_DIR)/include/apostrophe.h:
+	git submodule update --init
+
+update-apostrophe: $(APOSTROPHE_DIR)/include/apostrophe.h
+	@set -euo pipefail; \
+	git -C "$(APOSTROPHE_DIR)" fetch origin "$(APOSTROPHE_BRANCH)"; \
+	commit=$$(git -C "$(APOSTROPHE_DIR)" rev-parse "origin/$(APOSTROPHE_BRANCH)"); \
+	git -C "$(APOSTROPHE_DIR)" checkout "$$commit" >/dev/null; \
+	echo "Apostrophe pinned to $$commit"
 
 # ── Native macOS build ──────────────────────────────────────
 
@@ -197,6 +210,7 @@ help:
 	@echo "  tg5040        Build for TG5040 (Docker cross-compile)"
 	@echo "  tg5050        Build for TG5050 (Docker cross-compile)"
 	@echo "  my355         Build for Miyoo Flip (Docker cross-compile)"
+	@echo "  update-apostrophe  Pin Apostrophe submodule to origin/main"
 	@echo "  package       Package all platforms (.pak.zip + .pakz)"
 	@echo "  deploy        Detect adb platform, package, and push"
 	@echo "  clean         Remove build artifacts"

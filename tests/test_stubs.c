@@ -10,10 +10,12 @@ void ap_log(const char *fmt, ...)
 }
 
 void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
-                         bool use_global_bg, bool write_when_missing_art)
+                         bool use_global_bg, bool write_when_missing_art,
+                         sc_color bg_color)
 {
     (void)art_src_path;
     (void)dest_folder;
     (void)use_global_bg;
     (void)write_when_missing_art;
+    (void)bg_color;
 }

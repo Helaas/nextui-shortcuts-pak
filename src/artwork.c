@@ -105,7 +105,8 @@ static uint32_t elapsed_ms(uint32_t start_ms)
 /* ── Main compositing function ────────────────────────────────── */
 
 void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
-                         bool use_global_bg, bool write_when_missing_art)
+                         bool use_global_bg, bool write_when_missing_art,
+                         sc_color bg_color)
 {
     uint32_t start_ms = SDL_GetTicks();
     uint32_t art_load_ms = 0;
@@ -142,9 +143,10 @@ void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
         return;
     }
 
-    /* Fill with opaque black. */
+    /* Fill with theme background color. */
     SDL_FillRect(canvas, NULL,
-                 SDL_MapRGBA(canvas->format, 0, 0, 0, 255));
+                 SDL_MapRGBA(canvas->format, bg_color.r, bg_color.g,
+                             bg_color.b, bg_color.a));
     compose_ms += elapsed_ms(step_ms);
 
     /* Layer 1: global bg.png (scaled to cover, centre-crop). */
@@ -326,12 +328,13 @@ int regenerate_all_media(const app_settings *settings)
 
     bool use_bg, write_when_missing_art;
     artwork_bg_params(settings, &use_bg, &write_when_missing_art);
+    sc_color bg_color = get_theme_bg_color();
 
     for (int i = 0; i < count; i++) {
         char art_src[SC_MAX_PATH];
         shortcut_art_src_path(&shortcuts[i], art_src, sizeof(art_src));
         generate_artwork_bg(art_src, shortcuts[i].path, use_bg,
-                            write_when_missing_art);
+                            write_when_missing_art, bg_color);
     }
 
     ap_log("regenerate_all_media: processed %d shortcuts in %ums",

@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 #include <stdarg.h>
+#include <stdint.h>
 
 /* ── Logging (declared here so device.c can be compiled without apostrophe.h
  *    in test builds) ─────────────────────────────────────────── */
@@ -53,8 +54,10 @@ typedef enum {
     SC_POS_ALPHA  = 2,   /* No prefix     — alphabetical */
 } sc_position;
 
+typedef struct { uint8_t r, g, b, a; } sc_color;
+
 typedef enum {
-    ART_MODE_BLACK     = 0,  /* Art on black canvas; always writes bg.png */
+    ART_MODE_BLACK     = 0,  /* Art on theme bg color; always writes bg.png */
     ART_MODE_WALLPAPER = 1,  /* Art on device wallpaper; always writes bg.png */
     ART_MODE_FALLBACK  = 2,  /* Art on wallpaper; skips when no art exists */
 } art_mode;
@@ -181,9 +184,11 @@ void ensure_bridge_emu(void);
 /* ── artwork.c ────────────────────────────────────────────────── */
 
 void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
-                         bool use_global_bg, bool write_when_missing_art);
+                         bool use_global_bg, bool write_when_missing_art,
+                         sc_color bg_color);
 void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size);
 int regenerate_all_media(const app_settings *settings);
+sc_color get_theme_bg_color(void);
 int remove_all_media(void);
 
 /* ── ui.c ─────────────────────────────────────────────────────── */

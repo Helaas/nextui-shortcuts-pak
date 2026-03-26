@@ -840,7 +840,7 @@ void show_settings_screen(void)
     };
     /* Option: Artwork mode */
     ap_option mode_opts[] = {
-        { .label = "Art on Black background",    .value = "0" },
+        { .label = "Art on Background color",    .value = "0" },
         { .label = "Art on Main menu Wallpaper", .value = "1" },
         { .label = "Fallback to wallpaper",      .value = "2" },
     };

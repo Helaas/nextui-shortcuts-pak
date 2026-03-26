@@ -675,6 +675,90 @@ void get_screen_dimensions(int *w, int *h)
 #endif
 }
 
+/* ── Theme background color ──────────────────────────────────── */
+
+static sc_color hex_to_sc_color(const char *hex)
+{
+    sc_color c = {0, 0, 0, 255};
+    if (!hex || !hex[0]) return c;
+    if (hex[0] == '#') hex++;
+    else if (hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X')) hex += 2;
+    unsigned long val = strtoul(hex, NULL, 16);
+    c.r = (uint8_t)((val >> 16) & 0xFF);
+    c.g = (uint8_t)((val >>  8) & 0xFF);
+    c.b = (uint8_t)( val        & 0xFF);
+    return c;
+}
+
+sc_color get_theme_bg_color(void)
+{
+    static sc_color cached = {0, 0, 0, 255};
+    static bool loaded = false;
+    if (loaded) return cached;
+    loaded = true;
+
+#if defined(PLATFORM_MAC)
+    return cached; /* No nextval.elf on macOS dev builds. */
+#else
+    /* Find nextval.elf: prefer SYSTEM_PATH env, fall back to platform path. */
+    const char *nextval_path = NULL;
+    char nextval_env_buf[256] = {0};
+    const char *system_path = getenv("SYSTEM_PATH");
+    if (system_path && system_path[0]) {
+        snprintf(nextval_env_buf, sizeof(nextval_env_buf),
+                 "%s/bin/nextval.elf", system_path);
+        if (access(nextval_env_buf, X_OK) == 0)
+            nextval_path = nextval_env_buf;
+    }
+    if (!nextval_path) {
+        static const char *fallback =
+            "/mnt/SDCARD/.system/" PLATFORM_SUBDIR "/bin/nextval.elf";
+        if (access(fallback, X_OK) == 0)
+            nextval_path = fallback;
+    }
+    if (!nextval_path) {
+        ap_log("get_theme_bg_color: nextval.elf not found, using black");
+        return cached;
+    }
+
+    FILE *fp = popen(nextval_path, "r");
+    if (!fp) {
+        ap_log("get_theme_bg_color: failed to run nextval.elf");
+        return cached;
+    }
+
+    char json_buf[4096] = {0};
+    size_t total = 0;
+    while (total < sizeof(json_buf) - 1) {
+        size_t n = fread(json_buf + total, 1, sizeof(json_buf) - 1 - total, fp);
+        if (n == 0) break;
+        total += n;
+    }
+    json_buf[total] = '\0';
+    pclose(fp);
+
+    cJSON *json = cJSON_Parse(json_buf);
+    if (!json) {
+        ap_log("get_theme_bg_color: failed to parse nextval output");
+        return cached;
+    }
+
+    /* Prefer color7 (NextUI ≥ PR#661), fall back to legacy bgcolor. */
+    cJSON *color = cJSON_GetObjectItem(json, "color7");
+    if (!cJSON_IsString(color) || !color->valuestring[0])
+        color = cJSON_GetObjectItem(json, "bgcolor");
+
+    if (cJSON_IsString(color) && color->valuestring[0]) {
+        cached = hex_to_sc_color(color->valuestring);
+        ap_log("get_theme_bg_color: %s → r=%u g=%u b=%u",
+               color->valuestring, cached.r, cached.g, cached.b);
+    }
+
+    cJSON_Delete(json);
+    return cached;
+#endif
+}
+
 /* ── Settings (JSON via cJSON) ────────────────────────────────── */
 
 app_settings load_settings(void)
@@ -1346,7 +1430,7 @@ int create_rom_shortcut(const char *display_name, const char *tag,
         bool use_bg, write_when_missing_art;
         artwork_bg_params(settings, &use_bg, &write_when_missing_art);
         generate_artwork_bg(art_src, folder_path, use_bg,
-                            write_when_missing_art);
+                            write_when_missing_art, get_theme_bg_color());
     }
 
     ap_log("create_rom_shortcut: created folder=%s", folder_path);
@@ -1405,7 +1489,7 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
         bool use_bg, write_when_missing_art;
         artwork_bg_params(settings, &use_bg, &write_when_missing_art);
         generate_artwork_bg(art_src, folder_path, use_bg,
-                            write_when_missing_art);
+                            write_when_missing_art, get_theme_bg_color());
     }
 
     ap_log("create_tool_shortcut: created folder=%s", folder_path);
