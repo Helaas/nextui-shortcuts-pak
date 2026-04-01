@@ -11,6 +11,8 @@ APOSTROPHE_BRANCH := main
 BUILD_DIR := build
 DIST_DIR := $(BUILD_DIR)/release
 STAGING_DIR := $(BUILD_DIR)/staging
+CACHE_DIR := .cache
+NEXTUI_PREVIEW_CACHE := $(CACHE_DIR)/nextui-preview
 TEST_BUILD_DIR := $(BUILD_DIR)/tests
 TEST_BIN := $(TEST_BUILD_DIR)/scan_tests
 SRC_FILES := $(shell find src -name '*.c' -print | sort)
@@ -25,7 +27,8 @@ COMMON_INCLUDES := -I$(APOSTROPHE_DIR)/include -Isrc
 
 .PHONY: all native mac run-mac run-native tg5040 tg5050 my355 \
 	test-native package package-tg5040 package-tg5050 package-my355 do-package \
-	deploy deploy-platform clean help update-apostrophe
+	deploy deploy-platform clean help update-apostrophe \
+	setup-nextui-preview-cache clean-nextui-preview-cache
 
 # ── Default target ──────────────────────────────────────────
 
@@ -47,7 +50,8 @@ update-apostrophe: $(APOSTROPHE_DIR)/include/apostrophe.h
 
 # ── Native macOS build ──────────────────────────────────────
 
-mac:
+mac: $(APOSTROPHE_DIR)/include/apostrophe.h
+	@$(MAKE) setup-nextui-preview-cache
 	@mkdir -p $(BUILD_DIR)/mac
 	cc -std=gnu11 -O0 -g \
 		-DPLATFORM_MAC \
@@ -60,6 +64,13 @@ mac:
 
 run-mac: mac
 	./$(BUILD_DIR)/mac/$(APP_NAME)
+
+setup-nextui-preview-cache: $(APOSTROPHE_DIR)/include/apostrophe.h
+	@$(MAKE) -C $(APOSTROPHE_DIR) setup-nextui-preview-cache \
+		CACHE_DIR=$(CURDIR)/$(CACHE_DIR)
+
+clean-nextui-preview-cache:
+	rm -rf $(NEXTUI_PREVIEW_CACHE)
 
 $(TEST_BIN): $(TEST_SRC_FILES)
 	@mkdir -p $(TEST_BUILD_DIR)
@@ -211,6 +222,8 @@ help:
 	@echo "  tg5050        Build for TG5050 (Docker cross-compile)"
 	@echo "  my355         Build for Miyoo Flip (Docker cross-compile)"
 	@echo "  update-apostrophe  Pin Apostrophe submodule to origin/main"
+	@echo "  setup-nextui-preview-cache  Fetch pinned NextUI preview sprites into .cache"
+	@echo "  clean-nextui-preview-cache  Remove the cached desktop preview assets"
 	@echo "  package       Package all platforms (.pak.zip + .pakz)"
 	@echo "  deploy        Detect adb platform, package, and push"
 	@echo "  clean         Remove build artifacts"
