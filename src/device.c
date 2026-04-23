@@ -284,21 +284,17 @@ static bool format_console_display_name(const char *name,
     return copy_fmt_exact(out, out_size, "%s (%s)", display, tag);
 }
 
-static bool strip_shortcut_sort_prefix(char *name)
+static void strip_shortcut_sort_prefix(char *name)
 {
-    if (!name) return false;
+    if (!name) return;
 
     if (starts_with(name, SHORTCUT_PREFIX)) {
         memmove(name, name + SHORTCUT_PREFIX_LEN,
                 strlen(name + SHORTCUT_PREFIX_LEN) + 1);
-        return true;
-    }
-    if (starts_with(name, LEGACY_PREFIX)) {
+    } else if (starts_with(name, LEGACY_PREFIX)) {
         memmove(name, name + LEGACY_PREFIX_LEN,
                 strlen(name + LEGACY_PREFIX_LEN) + 1);
-        return true;
     }
-    return false;
 }
 
 static int hex_value(char ch)
@@ -330,6 +326,8 @@ static bool append_encoded_shortcut_display(char *out, size_t out_size,
     return true;
 }
 
+/* Inverse of append_encoded_shortcut_display: only %25 and %2F are encoded,
+ * so this decoder is intentionally narrow. */
 static bool decode_shortcut_storage_display(const char *encoded,
                                             char *out, size_t out_size)
 {
@@ -513,6 +511,8 @@ static bool is_cue_folder_dir(const char *dir_path, const char *base_name)
     return dir_has_named_companion(dir_path, base_name, ".cue");
 }
 
+static void *grow_array(void *arr, int *cap, int count, size_t elem_size);
+
 typedef struct {
     char *key;
     char *value;
@@ -521,6 +521,7 @@ typedef struct {
 typedef struct {
     rom_title_map_entry *entries;
     int count;
+    int cap;
 } rom_title_map;
 
 static void free_rom_title_map(rom_title_map *map)
@@ -534,24 +535,23 @@ static void free_rom_title_map(rom_title_map *map)
     free(map->entries);
     map->entries = NULL;
     map->count = 0;
+    map->cap = 0;
 }
 
 static bool append_rom_title_map_entry(rom_title_map *map,
                                        const char *key,
                                        const char *value)
 {
-    rom_title_map_entry *entries;
     char *dup_key;
     char *dup_value;
 
     if (!map || !key || !value || key[0] == '\0' || value[0] == '\0')
         return true;
 
-    entries = realloc(map->entries,
-                      (size_t)(map->count + 1) * sizeof(*map->entries));
-    if (!entries)
+    map->entries = grow_array(map->entries, &map->cap, map->count,
+                              sizeof(*map->entries));
+    if (map->count >= map->cap)
         return false;
-    map->entries = entries;
 
     dup_key = strdup(key);
     dup_value = strdup(value);
@@ -964,6 +964,8 @@ static sc_color hex_to_sc_color(const char *hex)
 
 sc_color get_theme_bg_color(void)
 {
+    /* Cached for the process lifetime — regenerating artwork after an
+     * in-session theme change requires restarting the app. */
     static sc_color cached = {0, 0, 0, 255};
     static bool loaded = false;
     if (loaded) return cached;
@@ -1008,6 +1010,10 @@ sc_color get_theme_bg_color(void)
     }
     json_buf[total] = '\0';
     pclose(fp);
+
+    if (total == sizeof(json_buf) - 1)
+        ap_log("get_theme_bg_color: nextval output truncated at %zu bytes",
+               total);
 
     cJSON *json = cJSON_Parse(json_buf);
     if (!json) {
@@ -1673,7 +1679,7 @@ bool build_rom_target_path(const rom_file *rom, char *out, int out_size)
 bool rom_matches_shortcut_target(const rom_file *rom,
                                  const shortcut_entry *shortcut)
 {
-    char rom_target[SC_MAX_PATH * 2];
+    char rom_target[SC_MAX_PATH];
 
     if (!rom || !shortcut || shortcut->target_path[0] == '\0')
         return false;
@@ -1736,8 +1742,8 @@ static int copy_binary_file(const char *src, const char *dst)
     unsigned char buf[8192];
     int rc = -1;
 
-    if (!src || !dst || strcmp(src, dst) == 0)
-        return src && dst ? 0 : -1;
+    if (!src || !dst) return -1;
+    if (strcmp(src, dst) == 0) return 0;
 
     in = fopen(src, "rb");
     if (!in)
@@ -1987,6 +1993,8 @@ int remove_shortcut(const char *shortcut_path)
         return -1;
     const char *shortcut_name = strrchr(shortcut_path, '/');
     shortcut_name = shortcut_name ? shortcut_name + 1 : shortcut_path;
+    /* Remove the root thumbnail first; if the folder delete below fails,
+     * the next regenerate will rebuild the thumbnail. */
     if (remove_shortcut_thumbnail(shortcut_name) != 0)
         ap_log("remove_shortcut: failed to remove root thumbnail");
     if (S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode))
