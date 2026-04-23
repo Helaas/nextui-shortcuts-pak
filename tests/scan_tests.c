@@ -700,6 +700,14 @@ static bool test_map_txt_resolves_rom_titles(void)
     CHECK(strcmp(unmapped->source_stem, "unmapped") == 0,
           "unexpected unmapped source stem: %s", unmapped->source_stem);
 
+    /* Malformed map.txt lines must not produce mappings. */
+    for (int i = 0; i < count; i++) {
+        CHECK(strcmp(roms[i].display, "malformed line") != 0,
+              "malformed map line was accepted as a mapping");
+        CHECK(strcmp(roms[i].display, "blank key") != 0,
+              "empty-key map line was accepted as a mapping");
+    }
+
     ok = true;
 
 cleanup:

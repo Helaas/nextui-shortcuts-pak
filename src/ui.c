@@ -472,14 +472,14 @@ void add_rom_shortcut_flow(void)
     if (!pick_console(&console)) return;
 
     rom_file rom;
-    shortcut_entry *shortcuts = NULL;
-    int shortcut_count = 0;
     if (!pick_rom(&console, &rom)) return;
 
     const char *display_name = rom.display;
     ap_log("ui: add rom shortcut: console=%s rom=%s multi=%d",
            console.display, rom.name, rom.is_multi_disc);
 
+    shortcut_entry *shortcuts = NULL;
+    int shortcut_count = 0;
     if (scan_shortcuts(&shortcuts, &shortcut_count) != 0) {
         show_error("Could not read shortcuts.");
         free(shortcuts);
