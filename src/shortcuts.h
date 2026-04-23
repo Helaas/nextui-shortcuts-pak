@@ -82,6 +82,7 @@ typedef struct {
     char name[SC_MAX_NAME];
     char path[SC_MAX_PATH];
     char display[SC_MAX_DISPLAY];
+    char source_stem[SC_MAX_DISPLAY];
     bool is_multi_disc;
     bool is_cue_folder;
     bool is_disabled;
@@ -130,8 +131,9 @@ bool ends_with(const char *str, const char *suffix);
 void extract_tag(const char *name, char *out, int out_size);
 void extract_display_name(const char *name, char *out, int out_size);
 void strip_extension(const char *name, char *out, int out_size);
-bool build_folder_name(sc_position pos, const char *display, const char *tag,
-                       char *out, int out_size);
+bool build_rom_target_path(const rom_file *rom, char *out, int out_size);
+bool rom_matches_shortcut_target(const rom_file *rom,
+                                 const shortcut_entry *shortcut);
 bool is_hidden(const char *name);
 bool is_mac_dotfile(const char *name);
 bool is_shortcut_folder(const char *folder_path);
@@ -169,8 +171,8 @@ int scan_shortcuts(shortcut_entry **out, int *count);
 /* ── device.c — Shortcut CRUD ─────────────────────────────────── */
 
 int create_rom_shortcut(const char *display_name, const char *tag,
-                        const char *console_dir_name, const rom_file *rom,
-                        sc_position pos, const app_settings *settings);
+                        const rom_file *rom, sc_position pos,
+                        const app_settings *settings);
 int create_tool_shortcut(const char *display_name, const char *pak_path,
                          sc_position pos, const app_settings *settings);
 int remove_shortcut(const char *shortcut_path);

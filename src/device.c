@@ -80,6 +80,12 @@ static bool append_cstr_exact(char *out, size_t out_size, const char *suffix)
     return true;
 }
 
+static bool append_char_exact(char *out, size_t out_size, char ch)
+{
+    char suffix[2] = { ch, '\0' };
+    return append_cstr_exact(out, out_size, suffix);
+}
+
 static bool strip_trailing_suffix(char *str, const char *suffix)
 {
     size_t str_len;
@@ -173,6 +179,25 @@ static void copy_with_suffix_trunc(char *out, size_t out_size,
     out[src_len + suffix_len] = '\0';
 }
 
+static bool copy_fmt_exact(char *out, size_t out_size, const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    if (!out || out_size == 0 || !fmt)
+        return false;
+
+    va_start(ap, fmt);
+    n = vsnprintf(out, out_size, fmt, ap);
+    va_end(ap);
+
+    if (n < 0 || (size_t)n >= out_size) {
+        out[0] = '\0';
+        return false;
+    }
+    return true;
+}
+
 /* extract_tag: "Game Boy Advance (GBA)" -> "GBA" */
 void extract_tag(const char *name, char *out, int out_size)
 {
@@ -240,6 +265,25 @@ void strip_extension(const char *name, char *out, int out_size)
     copy_cstr_trunc(out, (size_t)out_size, name);
 }
 
+static bool format_console_display_name(const char *name,
+                                        char *out, size_t out_size)
+{
+    char tag[SC_MAX_TAG];
+    char display[SC_MAX_DISPLAY];
+
+    if (!name || !out || out_size == 0)
+        return false;
+
+    extract_tag(name, tag, sizeof(tag));
+    if (tag[0] == '\0') {
+        copy_cstr_trunc(out, out_size, name);
+        return true;
+    }
+
+    extract_display_name(name, display, sizeof(display));
+    return copy_fmt_exact(out, out_size, "%s (%s)", display, tag);
+}
+
 /* build_folder_name: construct prefixed shortcut folder name.
  * Returns false if the result was truncated. */
 bool build_folder_name(sc_position pos, const char *display, const char *tag,
@@ -258,6 +302,115 @@ bool build_folder_name(sc_position pos, const char *display, const char *tag,
         break;
     }
     return n >= 0 && n < out_size;
+}
+
+static bool strip_shortcut_sort_prefix(char *name)
+{
+    if (!name) return false;
+
+    if (starts_with(name, SHORTCUT_PREFIX)) {
+        memmove(name, name + SHORTCUT_PREFIX_LEN,
+                strlen(name + SHORTCUT_PREFIX_LEN) + 1);
+        return true;
+    }
+    if (starts_with(name, LEGACY_PREFIX)) {
+        memmove(name, name + LEGACY_PREFIX_LEN,
+                strlen(name + LEGACY_PREFIX_LEN) + 1);
+        return true;
+    }
+    return false;
+}
+
+static int hex_value(char ch)
+{
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    return -1;
+}
+
+static bool append_encoded_shortcut_display(char *out, size_t out_size,
+                                            const char *display)
+{
+    const unsigned char *p = (const unsigned char *)display;
+
+    if (!display) return true;
+
+    for (; *p; p++) {
+        if (*p == '%') {
+            if (!append_cstr_exact(out, out_size, "%25"))
+                return false;
+        } else if (*p == '/') {
+            if (!append_cstr_exact(out, out_size, "%2F"))
+                return false;
+        } else if (!append_char_exact(out, out_size, (char)*p)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool decode_shortcut_storage_display(const char *encoded,
+                                            char *out, size_t out_size)
+{
+    size_t pos = 0;
+
+    if (!out || out_size == 0) return false;
+    out[0] = '\0';
+    if (!encoded) return true;
+
+    for (size_t i = 0; encoded[i] != '\0'; i++) {
+        char decoded = '\0';
+
+        if (encoded[i] == '%' &&
+            encoded[i + 1] != '\0' &&
+            encoded[i + 2] != '\0') {
+            int hi = hex_value(encoded[i + 1]);
+            int lo = hex_value(encoded[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                int value = (hi << 4) | lo;
+                if (value == '%' || value == '/') {
+                    decoded = (char)value;
+                    i += 2;
+                }
+            }
+        }
+
+        if (decoded == '\0')
+            decoded = encoded[i];
+
+        if (pos + 1 >= out_size) {
+            out[0] = '\0';
+            return false;
+        }
+        out[pos++] = decoded;
+    }
+
+    out[pos] = '\0';
+    return true;
+}
+
+static bool build_shortcut_storage_name(sc_position pos,
+                                        const char *display,
+                                        const char *tag,
+                                        char *out, size_t out_size)
+{
+    const char *prefix = "";
+
+    if (!out || out_size == 0 || !tag) return false;
+    out[0] = '\0';
+
+    switch (pos) {
+    case SC_POS_TOP:    prefix = TOP_PREFIX; break;
+    case SC_POS_BOTTOM: prefix = SHORTCUT_PREFIX; break;
+    default:            prefix = ""; break;
+    }
+
+    return append_cstr_exact(out, out_size, prefix) &&
+           append_encoded_shortcut_display(out, out_size, display) &&
+           append_cstr_exact(out, out_size, " (") &&
+           append_cstr_exact(out, out_size, tag) &&
+           append_cstr_exact(out, out_size, ")");
 }
 
 bool is_hidden(const char *name)
@@ -378,6 +531,143 @@ static bool is_multi_disc_dir(const char *dir_path, const char *base_name)
 static bool is_cue_folder_dir(const char *dir_path, const char *base_name)
 {
     return dir_has_named_companion(dir_path, base_name, ".cue");
+}
+
+typedef struct {
+    char *key;
+    char *value;
+} rom_title_map_entry;
+
+typedef struct {
+    rom_title_map_entry *entries;
+    int count;
+} rom_title_map;
+
+static void free_rom_title_map(rom_title_map *map)
+{
+    if (!map) return;
+
+    for (int i = 0; i < map->count; i++) {
+        free(map->entries[i].key);
+        free(map->entries[i].value);
+    }
+    free(map->entries);
+    map->entries = NULL;
+    map->count = 0;
+}
+
+static bool append_rom_title_map_entry(rom_title_map *map,
+                                       const char *key,
+                                       const char *value)
+{
+    rom_title_map_entry *entries;
+    char *dup_key;
+    char *dup_value;
+
+    if (!map || !key || !value || key[0] == '\0' || value[0] == '\0')
+        return true;
+
+    entries = realloc(map->entries,
+                      (size_t)(map->count + 1) * sizeof(*map->entries));
+    if (!entries)
+        return false;
+    map->entries = entries;
+
+    dup_key = strdup(key);
+    dup_value = strdup(value);
+    if (!dup_key || !dup_value) {
+        free(dup_key);
+        free(dup_value);
+        return false;
+    }
+
+    map->entries[map->count].key = dup_key;
+    map->entries[map->count].value = dup_value;
+    map->count++;
+    return true;
+}
+
+static const char *lookup_rom_title(const rom_title_map *map, const char *key)
+{
+    if (!map || !key || key[0] == '\0')
+        return NULL;
+
+    for (int i = map->count - 1; i >= 0; i--) {
+        if (strcmp(map->entries[i].key, key) == 0)
+            return map->entries[i].value;
+    }
+    return NULL;
+}
+
+static bool load_rom_title_map(const char *console_path, rom_title_map *out)
+{
+    char map_path[SC_MAX_PATH * 2];
+    char *data;
+    char *line;
+    bool ok = true;
+    bool first_line = true;
+
+    if (!out)
+        return false;
+    out->entries = NULL;
+    out->count = 0;
+
+    if (!join_path(map_path, sizeof(map_path), console_path, "map.txt"))
+        return false;
+
+    data = read_text_file(map_path);
+    if (!data)
+        return true;
+
+    line = data;
+    while (line && *line) {
+        char *next = strchr(line, '\n');
+        char *tab;
+        char *key;
+        char *value;
+
+        if (next) {
+            *next = '\0';
+            if (next > line && next[-1] == '\r')
+                next[-1] = '\0';
+        }
+
+        key = line;
+        if (first_line &&
+            (unsigned char)key[0] == 0xEF &&
+            (unsigned char)key[1] == 0xBB &&
+            (unsigned char)key[2] == 0xBF) {
+            key += 3;
+        }
+        first_line = false;
+
+        tab = strchr(key, '\t');
+        if (tab) {
+            *tab = '\0';
+            value = tab + 1;
+            if (key[0] != '\0' && value[0] != '\0' &&
+                !append_rom_title_map_entry(out, key, value)) {
+                ok = false;
+                break;
+            }
+        }
+
+        line = next ? next + 1 : NULL;
+    }
+
+    free(data);
+    if (!ok)
+        free_rom_title_map(out);
+    return ok;
+}
+
+static void resolve_rom_display(const rom_title_map *map,
+                                const char *lookup_key,
+                                const char *fallback,
+                                char *out, size_t out_size)
+{
+    const char *mapped = lookup_rom_title(map, lookup_key);
+    copy_cstr_trunc(out, out_size, mapped ? mapped : fallback);
 }
 
 bool is_shortcut_folder(const char *folder_path)
@@ -1024,7 +1314,12 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
             ap_log("scan_console_dirs: skipping overlong path %s", full);
             continue;
         }
-        extract_display_name(base_name, c->display, sizeof(c->display));
+        if (!format_console_display_name(base_name, c->display,
+                                         sizeof(c->display))) {
+            ap_log("scan_console_dirs: skipping overlong display %s",
+                   base_name);
+            continue;
+        }
         c->is_disabled = disabled;
         n++;
     }
@@ -1040,6 +1335,7 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
 
 /* Internal recursive ROM scanner. */
 static int scan_roms_internal(const char *dir_path, bool show_hidden,
+                              const rom_title_map *title_map,
                               rom_file **arr, int *n, int *cap,
                               bool fail_on_open_error)
 {
@@ -1073,13 +1369,22 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
                 if (*n >= *cap) { closedir(d); return -1; }
                 rom_file *r = &(*arr)[*n];
+                char lookup_key[SC_MAX_NAME];
                 memset(r, 0, sizeof(*r));
                 copy_cstr_trunc(r->name, sizeof(r->name), name);
                 if (!copy_cstr_exact(r->path, sizeof(r->path), full)) {
                     ap_log("scan_roms: skipping overlong path %s", full);
                     continue;
                 }
-                copy_cstr_trunc(r->display, sizeof(r->display), base_name);
+                copy_cstr_trunc(r->source_stem, sizeof(r->source_stem),
+                                base_name);
+                if (!copy_fmt_exact(lookup_key, sizeof(lookup_key),
+                                    "%s.m3u", base_name)) {
+                    closedir(d);
+                    return -1;
+                }
+                resolve_rom_display(title_map, lookup_key, base_name,
+                                    r->display, sizeof(r->display));
                 r->is_multi_disc = true;
                 r->is_disabled = disabled;
                 (*n)++;
@@ -1090,13 +1395,22 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
                 if (*n >= *cap) { closedir(d); return -1; }
                 rom_file *r = &(*arr)[*n];
+                char lookup_key[SC_MAX_NAME];
                 memset(r, 0, sizeof(*r));
                 copy_cstr_trunc(r->name, sizeof(r->name), name);
                 if (!copy_cstr_exact(r->path, sizeof(r->path), full)) {
                     ap_log("scan_roms: skipping overlong path %s", full);
                     continue;
                 }
-                copy_cstr_trunc(r->display, sizeof(r->display), base_name);
+                copy_cstr_trunc(r->source_stem, sizeof(r->source_stem),
+                                base_name);
+                if (!copy_fmt_exact(lookup_key, sizeof(lookup_key),
+                                    "%s.cue", base_name)) {
+                    closedir(d);
+                    return -1;
+                }
+                resolve_rom_display(title_map, lookup_key, base_name,
+                                    r->display, sizeof(r->display));
                 r->is_cue_folder = true;
                 r->is_disabled = disabled;
                 (*n)++;
@@ -1104,7 +1418,8 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
             }
 
             /* Plain subfolder — recurse. */
-            if (scan_roms_internal(full, show_hidden, arr, n, cap, false) != 0) {
+            if (scan_roms_internal(full, show_hidden, title_map,
+                                   arr, n, cap, false) != 0) {
                 closedir(d);
                 return -1;
             }
@@ -1122,7 +1437,9 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
             ap_log("scan_roms: skipping overlong path %s", full);
             continue;
         }
-        strip_extension(base_name, r->display, sizeof(r->display));
+        strip_extension(base_name, r->source_stem, sizeof(r->source_stem));
+        resolve_rom_display(title_map, base_name, r->source_stem,
+                            r->display, sizeof(r->display));
         r->is_disabled = disabled;
         (*n)++;
     }
@@ -1135,9 +1452,18 @@ int scan_roms(const char *console_path, bool show_hidden,
 {
     rom_file *arr = NULL;
     int n = 0, cap = 0;
+    rom_title_map title_map = {0};
+    int rc;
 
-    int rc = scan_roms_internal(console_path, show_hidden, &arr, &n, &cap,
-                                true);
+    if (!load_rom_title_map(console_path, &title_map)) {
+        *out = NULL;
+        *count = 0;
+        return -1;
+    }
+
+    rc = scan_roms_internal(console_path, show_hidden, &title_map,
+                            &arr, &n, &cap, true);
+    free_rom_title_map(&title_map);
     if (rc != 0) {
         free(arr);
         *out = NULL;
@@ -1267,15 +1593,12 @@ int scan_shortcuts(shortcut_entry **out, int *count)
             copy_cstr_trunc(display, sizeof(display), marker);
             free(marker);
         } else {
+            char decoded[SC_MAX_DISPLAY];
             extract_display_name(name, display, sizeof(display));
-            /* Strip ZWS or legacy prefix. */
-            if (starts_with(display, SHORTCUT_PREFIX)) {
-                memmove(display, display + SHORTCUT_PREFIX_LEN,
-                        strlen(display + SHORTCUT_PREFIX_LEN) + 1);
-            } else if (starts_with(display, LEGACY_PREFIX)) {
-                memmove(display, display + LEGACY_PREFIX_LEN,
-                        strlen(display + LEGACY_PREFIX_LEN) + 1);
-            }
+            strip_shortcut_sort_prefix(display);
+            if (decode_shortcut_storage_display(display, decoded,
+                                                sizeof(decoded)))
+                copy_cstr_trunc(display, sizeof(display), decoded);
         }
 
         arr = grow_array(arr, &cap, n, sizeof(shortcut_entry));
@@ -1347,17 +1670,75 @@ int scan_shortcuts(shortcut_entry **out, int *count)
     return 0;
 }
 
+bool build_rom_target_path(const rom_file *rom, char *out, int out_size)
+{
+    const char *suffix;
+    const char *stem;
+
+    if (!out || out_size <= 0) return false;
+    out[0] = '\0';
+    if (!rom) return false;
+
+    if (!rom->is_multi_disc && !rom->is_cue_folder)
+        return copy_cstr_exact(out, (size_t)out_size, rom->path);
+
+    suffix = rom->is_multi_disc ? ".m3u" : ".cue";
+    stem = rom->source_stem[0] != '\0' ? rom->source_stem : rom->display;
+    return join_path_with_suffix(out, (size_t)out_size, rom->path,
+                                 stem, suffix);
+}
+
+bool rom_matches_shortcut_target(const rom_file *rom,
+                                 const shortcut_entry *shortcut)
+{
+    char rom_target[SC_MAX_PATH * 2];
+
+    if (!rom || !shortcut || shortcut->target_path[0] == '\0')
+        return false;
+    if (!build_rom_target_path(rom, rom_target, sizeof(rom_target)))
+        return false;
+    return strcmp(rom_target, shortcut->target_path) == 0;
+}
+
+static bool build_rom_art_src_path(const rom_file *rom, char *out,
+                                   size_t out_size)
+{
+    char rom_parent[SC_MAX_PATH];
+    char art_name[SC_MAX_DISPLAY];
+    char *last_slash;
+
+    if (!rom || !out || out_size == 0)
+        return false;
+    out[0] = '\0';
+
+    copy_cstr_trunc(rom_parent, sizeof(rom_parent), rom->path);
+    last_slash = strrchr(rom_parent, '/');
+    if (!last_slash)
+        return false;
+    *last_slash = '\0';
+
+    copy_cstr_trunc(art_name, sizeof(art_name),
+                    rom->source_stem[0] != '\0' ? rom->source_stem
+                                                : rom->display);
+
+    return join_path(out, out_size, rom_parent, ".media") &&
+           append_cstr_exact(out, out_size, "/") &&
+           append_cstr_exact(out, out_size, art_name) &&
+           append_cstr_exact(out, out_size, ".png");
+}
+
 /* ── Shortcut creation ────────────────────────────────────────── */
 
 int create_rom_shortcut(const char *display_name, const char *tag,
-                        const char *console_dir_name, const rom_file *rom,
-                        sc_position pos, const app_settings *settings)
+                        const rom_file *rom, sc_position pos,
+                        const app_settings *settings)
 {
     char roms_dir[SC_MAX_PATH];
     get_roms_path(roms_dir, sizeof(roms_dir));
 
     char folder_name[SC_MAX_NAME];
-    if (!build_folder_name(pos, display_name, tag, folder_name, sizeof(folder_name)))
+    if (!build_shortcut_storage_name(pos, display_name, tag,
+                                     folder_name, sizeof(folder_name)))
         return -1;
 
     char folder_path[SC_MAX_PATH * 2];
@@ -1386,10 +1767,10 @@ int create_rom_shortcut(const char *display_name, const char *tag,
     int rel_path_len;
     if (rom->is_multi_disc) {
         rel_path_len = snprintf(rel_path, sizeof(rel_path), "../%s/%s.m3u",
-                                rel_from_roms, rom->display);
+                                rel_from_roms, rom->source_stem);
     } else if (rom->is_cue_folder) {
         rel_path_len = snprintf(rel_path, sizeof(rel_path), "../%s/%s.cue",
-                                rel_from_roms, rom->display);
+                                rel_from_roms, rom->source_stem);
     } else {
         rel_path_len = snprintf(rel_path, sizeof(rel_path), "../%s",
                                 rel_from_roms);
@@ -1413,18 +1794,8 @@ int create_rom_shortcut(const char *display_name, const char *tag,
 
     /* Artwork. */
     if (settings->copy_artwork) {
-        /* Source art: <rom_parent_dir>/.media/<rom_display>.png */
         char art_src[SC_MAX_PATH * 2];
-        /* Get the parent directory of the ROM. */
-        char rom_parent[SC_MAX_PATH];
-        copy_cstr_trunc(rom_parent, sizeof(rom_parent), rom->path);
-        char *last_slash = strrchr(rom_parent, '/');
-        if (last_slash) *last_slash = '\0';
-
-        if (!join_path(art_src, sizeof(art_src), rom_parent, ".media") ||
-            !append_cstr_exact(art_src, sizeof(art_src), "/") ||
-            !append_cstr_exact(art_src, sizeof(art_src), rom->display) ||
-            !append_cstr_exact(art_src, sizeof(art_src), ".png"))
+        if (!build_rom_art_src_path(rom, art_src, sizeof(art_src)))
             return -1;
 
         bool use_bg, write_when_missing_art;
@@ -1445,8 +1816,8 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
     get_tools_path(tools_dir, sizeof(tools_dir));
 
     char folder_name[SC_MAX_NAME];
-    if (!build_folder_name(pos, display_name, BRIDGE_EMU_TAG,
-                           folder_name, sizeof(folder_name)))
+    if (!build_shortcut_storage_name(pos, display_name, BRIDGE_EMU_TAG,
+                                     folder_name, sizeof(folder_name)))
         return -1;
 
     char folder_path[SC_MAX_PATH * 2];
@@ -1517,8 +1888,8 @@ bool shortcut_exists(const char *display_name, const char *tag)
     sc_position positions[] = { SC_POS_BOTTOM, SC_POS_TOP, SC_POS_ALPHA };
     for (int i = 0; i < 3; i++) {
         char folder_name[SC_MAX_NAME];
-        if (!build_folder_name(positions[i], display_name, tag,
-                               folder_name, sizeof(folder_name)))
+        if (!build_shortcut_storage_name(positions[i], display_name, tag,
+                                         folder_name, sizeof(folder_name)))
             continue;
         char full[SC_MAX_PATH * 2];
         if (!join_path(full, sizeof(full), roms_dir, folder_name))
@@ -1546,8 +1917,8 @@ int rename_shortcut(const shortcut_entry *sc, const char *new_display)
     sc_position pos = detect_position(sc->name);
 
     char new_folder_name[SC_MAX_NAME];
-    if (!build_folder_name(pos, new_display, sc->tag,
-                           new_folder_name, sizeof(new_folder_name)))
+    if (!build_shortcut_storage_name(pos, new_display, sc->tag,
+                                     new_folder_name, sizeof(new_folder_name)))
         return -1;
 
     char roms_dir[SC_MAX_PATH];

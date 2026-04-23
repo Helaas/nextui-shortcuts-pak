@@ -188,11 +188,27 @@ static bool pick_console(console_dir *out)
 
 /* ── ROM picker ───────────────────────────────────────────────── */
 
+static bool rom_has_shortcut_in_list(const rom_file *rom,
+                                     const shortcut_entry *shortcuts,
+                                     int shortcut_count)
+{
+    if (!rom || !shortcuts || shortcut_count <= 0)
+        return false;
+
+    for (int i = 0; i < shortcut_count; i++) {
+        if (rom_matches_shortcut_target(rom, &shortcuts[i]))
+            return true;
+    }
+    return false;
+}
+
 static bool pick_rom(const console_dir *console, rom_file *out)
 {
     app_settings settings = load_settings();
     rom_file *roms = NULL;
+    shortcut_entry *shortcuts = NULL;
     int count = 0;
+    int shortcut_count = 0;
 
     int scan_rc = scan_roms(console->path, settings.show_hidden, &roms, &count);
     if (scan_rc != 0) {
@@ -208,11 +224,19 @@ static bool pick_rom(const console_dir *console, rom_file *out)
         return false;
     }
 
+    if (scan_shortcuts(&shortcuts, &shortcut_count) != 0) {
+        ap_log("ui: pick_rom unable to scan shortcuts for checkmarks");
+        free(shortcuts);
+        shortcuts = NULL;
+        shortcut_count = 0;
+    }
+
     ap_list_item *items = calloc(count, sizeof(ap_list_item));
     char (*labels)[SC_MAX_DISPLAY + 64] = calloc(count, sizeof(*labels));
     if (!items || !labels) {
         free(items);
         free(labels);
+        free(shortcuts);
         free(roms);
         return false;
     }
@@ -248,6 +272,8 @@ static bool pick_rom(const console_dir *console, rom_file *out)
 
         snprintf(labels[i], sizeof(labels[i]), "%s", text);
         items[i].label = labels[i];
+        if (rom_has_shortcut_in_list(&roms[i], shortcuts, shortcut_count))
+            items[i].trailing_text = "✓";
     }
 
     ap_footer_item footer[] = {
@@ -273,6 +299,7 @@ static bool pick_rom(const console_dir *console, rom_file *out)
 
     free(items);
     free(labels);
+    free(shortcuts);
     free(roms);
     return ok;
 }
@@ -342,7 +369,6 @@ static bool pick_tool(tool_pak *out)
 typedef struct {
     char display_name[SC_MAX_DISPLAY];
     char tag[SC_MAX_TAG];
-    char console_dir_name[SC_MAX_NAME];
     rom_file rom;
     sc_position pos;
     app_settings settings;
@@ -373,8 +399,7 @@ static int create_rom_worker_run(void *userdata)
 {
     create_rom_args *args = (create_rom_args *)userdata;
     return create_rom_shortcut(args->display_name, args->tag,
-                               args->console_dir_name, &args->rom,
-                               args->pos, &args->settings);
+                               &args->rom, args->pos, &args->settings);
 }
 
 static int create_rom_worker(void *userdata)
@@ -447,29 +472,36 @@ void add_rom_shortcut_flow(void)
     if (!pick_console(&console)) return;
 
     rom_file rom;
+    shortcut_entry *shortcuts = NULL;
+    int shortcut_count = 0;
     if (!pick_rom(&console, &rom)) return;
 
     const char *display_name = rom.display;
     ap_log("ui: add rom shortcut: console=%s rom=%s multi=%d",
            console.display, rom.name, rom.is_multi_disc);
 
-    if (shortcut_exists(display_name, console.tag)) {
+    if (scan_shortcuts(&shortcuts, &shortcut_count) != 0) {
+        show_error("Could not read shortcuts.");
+        free(shortcuts);
+        return;
+    }
+
+    if (rom_has_shortcut_in_list(&rom, shortcuts, shortcut_count)) {
+        free(shortcuts);
         char msg[SC_MAX_DISPLAY + 64];
         snprintf(msg, sizeof(msg),
-                 "A shortcut for \"%s\" already exists.", display_name);
+                 "This ROM already has a shortcut.");
         show_error(msg);
         return;
     }
+    free(shortcuts);
 
     sc_position pos;
     if (!pick_position(&pos)) return;
 
-    char folder_name[SC_MAX_NAME];
-    if (!build_folder_name(pos, display_name, console.tag,
-                           folder_name, sizeof(folder_name))) {
-        show_error("Folder name too long.");
-        return;
-    }
+    char preview_name[SC_MAX_DISPLAY + SC_MAX_TAG + 8];
+    snprintf(preview_name, sizeof(preview_name), "%s (%s)",
+             display_name, console.tag);
 
     /* Confirmation message. */
     char rom_desc[SC_MAX_NAME + 32];
@@ -482,7 +514,7 @@ void add_rom_shortcut_flow(void)
     char msg[2048];
     snprintf(msg, sizeof(msg),
              "Create shortcut?\n\n%s\n\nConsole: %s\nROM: %s",
-             folder_name, console.display, rom_desc);
+             preview_name, console.display, rom_desc);
 
     if (!show_confirm(msg, "Create")) return;
 
@@ -491,8 +523,6 @@ void add_rom_shortcut_flow(void)
     memset(&args, 0, sizeof(args));
     snprintf(args.display_name, sizeof(args.display_name), "%s", display_name);
     snprintf(args.tag, sizeof(args.tag), "%s", console.tag);
-    snprintf(args.console_dir_name, sizeof(args.console_dir_name), "%s",
-             console.name);
     args.rom = rom;
     args.pos = pos;
     args.settings = load_settings();
@@ -508,7 +538,7 @@ void add_rom_shortcut_flow(void)
     char done_msg[1024];
     snprintf(done_msg, sizeof(done_msg),
              "Shortcut created!\n\n%s\n\nwill appear on your main menu.",
-             folder_name);
+             preview_name);
     show_info(done_msg);
 }
 
@@ -533,17 +563,14 @@ void add_tool_shortcut_flow(void)
     sc_position pos;
     if (!pick_position(&pos)) return;
 
-    char folder_name[SC_MAX_NAME];
-    if (!build_folder_name(pos, display_name, BRIDGE_EMU_TAG,
-                           folder_name, sizeof(folder_name))) {
-        show_error("Folder name too long.");
-        return;
-    }
+    char preview_name[SC_MAX_DISPLAY + SC_MAX_TAG + 8];
+    snprintf(preview_name, sizeof(preview_name), "%s (%s)",
+             display_name, BRIDGE_EMU_TAG);
 
     char msg[2048];
     snprintf(msg, sizeof(msg),
              "Create shortcut?\n\n%s\n\nTool: %s",
-             folder_name, tool.name);
+             preview_name, tool.name);
 
     if (!show_confirm(msg, "Create")) return;
 
@@ -565,7 +592,7 @@ void add_tool_shortcut_flow(void)
     char done_msg[1024];
     snprintf(done_msg, sizeof(done_msg),
              "Shortcut created!\n\n%s\n\nwill appear on your main menu.",
-             folder_name);
+             preview_name);
     show_info(done_msg);
 }
 
