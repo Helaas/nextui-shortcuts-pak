@@ -15,6 +15,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 /* ── String utilities ─────────────────────────────────────────── */
@@ -591,6 +592,7 @@ static bool load_rom_title_map(const char *console_path, rom_title_map *out)
         return false;
     out->entries = NULL;
     out->count = 0;
+    out->cap = 0;
 
     if (!join_path(map_path, sizeof(map_path), console_path, "map.txt"))
         return false;
@@ -995,9 +997,36 @@ sc_color get_theme_bg_color(void)
         return cached;
     }
 
-    FILE *fp = popen(nextval_path, "r");
+    /* Spawn nextval.elf via fork/execv (no shell) so SYSTEM_PATH contents
+     * cannot be interpreted as shell metacharacters. */
+    int pipefd[2];
+    if (pipe(pipefd) != 0) {
+        ap_log("get_theme_bg_color: pipe() failed errno=%d", errno);
+        return cached;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        ap_log("get_theme_bg_color: fork() failed errno=%d", errno);
+        return cached;
+    }
+    if (pid == 0) {
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[0]);
+        close(pipefd[1]);
+        char *const argv[] = { (char *)nextval_path, NULL };
+        execv(nextval_path, argv);
+        _exit(127);
+    }
+    close(pipefd[1]);
+
+    FILE *fp = fdopen(pipefd[0], "r");
     if (!fp) {
-        ap_log("get_theme_bg_color: failed to run nextval.elf");
+        ap_log("get_theme_bg_color: fdopen() failed errno=%d", errno);
+        close(pipefd[0]);
+        waitpid(pid, NULL, 0);
         return cached;
     }
 
@@ -1009,7 +1038,8 @@ sc_color get_theme_bg_color(void)
         total += n;
     }
     json_buf[total] = '\0';
-    pclose(fp);
+    fclose(fp);
+    waitpid(pid, NULL, 0);
 
     if (total == sizeof(json_buf) - 1)
         ap_log("get_theme_bg_color: nextval output truncated at %zu bytes",

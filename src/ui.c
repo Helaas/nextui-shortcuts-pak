@@ -202,6 +202,11 @@ static bool rom_has_shortcut_in_list(const rom_file *rom,
     return false;
 }
 
+static int cmp_strptr(const void *a, const void *b)
+{
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
 static bool pick_rom(const console_dir *console, rom_file *out)
 {
     app_settings settings = load_settings();
@@ -231,11 +236,30 @@ static bool pick_rom(const console_dir *console, rom_file *out)
         shortcut_count = 0;
     }
 
+    /* Build a sorted index of shortcut target paths so we can check each
+     * rom's shortcut status in O(log m) instead of O(m). */
+    const char **sorted_targets = NULL;
+    int sorted_count = 0;
+    if (shortcut_count > 0) {
+        sorted_targets = calloc((size_t)shortcut_count,
+                                sizeof(*sorted_targets));
+        if (sorted_targets) {
+            for (int i = 0; i < shortcut_count; i++) {
+                if (shortcuts[i].target_path[0] != '\0')
+                    sorted_targets[sorted_count++] = shortcuts[i].target_path;
+            }
+            if (sorted_count > 1)
+                qsort(sorted_targets, (size_t)sorted_count,
+                      sizeof(*sorted_targets), cmp_strptr);
+        }
+    }
+
     ap_list_item *items = calloc(count, sizeof(ap_list_item));
     char (*labels)[SC_MAX_DISPLAY + 64] = calloc(count, sizeof(*labels));
     if (!items || !labels) {
         free(items);
         free(labels);
+        free(sorted_targets);
         free(shortcuts);
         free(roms);
         return false;
@@ -272,8 +296,17 @@ static bool pick_rom(const console_dir *console, rom_file *out)
 
         snprintf(labels[i], sizeof(labels[i]), "%s", text);
         items[i].label = labels[i];
-        if (rom_has_shortcut_in_list(&roms[i], shortcuts, shortcut_count))
-            items[i].trailing_text = "✓";
+
+        if (sorted_targets && sorted_count > 0) {
+            char rom_target[SC_MAX_PATH];
+            if (build_rom_target_path(&roms[i], rom_target,
+                                      sizeof(rom_target))) {
+                const char *needle = rom_target;
+                if (bsearch(&needle, sorted_targets, (size_t)sorted_count,
+                            sizeof(*sorted_targets), cmp_strptr))
+                    items[i].trailing_text = "✓";
+            }
+        }
     }
 
     ap_footer_item footer[] = {
@@ -299,6 +332,7 @@ static bool pick_rom(const console_dir *console, rom_file *out)
 
     free(items);
     free(labels);
+    free(sorted_targets);
     free(shortcuts);
     free(roms);
     return ok;
