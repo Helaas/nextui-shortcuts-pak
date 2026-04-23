@@ -704,6 +704,7 @@ static bool test_mapped_shortcut_creation_preserves_raw_targets_and_artwork(void
     };
     char marker_path[SC_MAX_PATH * 2];
     char m3u_path[SC_MAX_PATH * 2];
+    char root_thumb_path[SC_MAX_PATH * 2];
     static const char map_contents[] =
         "kof98.zip\tThe King of Fighters '98\n";
 
@@ -712,6 +713,9 @@ static bool test_mapped_shortcut_creation_preserves_raw_targets_and_artwork(void
           "mkdir disabled arcade console failed");
     CHECK(touch_file("mock_sdcard/Roms/Arcade (ARC).disabled/kof98.zip.disabled"),
           "create disabled mapped rom failed");
+    CHECK(write_file("mock_sdcard/Roms/Arcade (ARC).disabled/.media/kof98.png",
+                     "PNGDATA"),
+          "create disabled mapped source art failed");
     CHECK(write_file("mock_sdcard/Roms/Arcade (ARC).disabled/map.txt",
                      map_contents),
           "write disabled map.txt failed");
@@ -763,6 +767,12 @@ static bool test_mapped_shortcut_creation_preserves_raw_targets_and_artwork(void
           "unexpected art src path: %s", g_last_generated_art_src_path);
     CHECK(strstr(g_last_generated_art_dest_folder, shortcut->name) != NULL,
           "unexpected art dest folder: %s", g_last_generated_art_dest_folder);
+    CHECK(snprintf(root_thumb_path, sizeof(root_thumb_path),
+                   "mock_sdcard/Roms/.media/%s.png", shortcut->name) <
+          (int)sizeof(root_thumb_path),
+          "mapped root thumbnail path too long");
+    CHECK(file_contents_equal(root_thumb_path, "PNGDATA"),
+          "mapped root thumbnail was not copied from source art");
 
     ok = true;
 
@@ -792,6 +802,7 @@ static bool test_slash_mapped_shortcut_creation_uses_storage_safe_names(void)
     };
     char marker_path[SC_MAX_PATH * 2];
     char m3u_path[SC_MAX_PATH * 2];
+    char root_thumb_path[SC_MAX_PATH * 2];
     static const char mapped_title[] = "Aero Fighters 3 / Sonic Wings 3";
     static const char map_contents[] =
         "sonicwi3.zip\tAero Fighters 3 / Sonic Wings 3\n";
@@ -801,6 +812,9 @@ static bool test_slash_mapped_shortcut_creation_uses_storage_safe_names(void)
           "mkdir arcade console failed");
     CHECK(touch_file("mock_sdcard/Roms/Arcade (FBN)/sonicwi3.zip"),
           "create mapped rom failed");
+    CHECK(write_file("mock_sdcard/Roms/Arcade (FBN)/.media/sonicwi3.png",
+                     "SLASHART"),
+          "create slash-mapped source art failed");
     CHECK(write_file("mock_sdcard/Roms/Arcade (FBN)/map.txt", map_contents),
           "write slash map.txt failed");
 
@@ -849,6 +863,12 @@ static bool test_slash_mapped_shortcut_creation_uses_storage_safe_names(void)
                     "/mock_sdcard/Roms/Arcade (FBN)/.media/sonicwi3.png"),
           "unexpected slash-mapped art src path: %s",
           g_last_generated_art_src_path);
+    CHECK(snprintf(root_thumb_path, sizeof(root_thumb_path),
+                   "mock_sdcard/Roms/.media/%s.png", shortcut->name) <
+          (int)sizeof(root_thumb_path),
+          "slash-mapped root thumbnail path too long");
+    CHECK(file_contents_equal(root_thumb_path, "SLASHART"),
+          "slash-mapped root thumbnail was not copied from source art");
 
     ok = true;
 
@@ -1094,6 +1114,8 @@ static bool test_rename_shortcut_updates_layout_for_all_positions(void)
         char old_m3u_path[SC_MAX_PATH * 2];
         char new_m3u_path[SC_MAX_PATH * 2];
         char new_marker_path[SC_MAX_PATH * 2];
+        char old_thumb_path[SC_MAX_PATH * 2];
+        char new_thumb_path[SC_MAX_PATH * 2];
         shortcut_entry sc = {0};
 
         CHECK(build_folder_name(cases[i].pos, old_display, tag,
@@ -1123,8 +1145,20 @@ static bool test_rename_shortcut_updates_layout_for_all_positions(void)
         CHECK(snprintf(new_marker_path, sizeof(new_marker_path), "%s/.shortcut",
                        new_folder_path) < (int)sizeof(new_marker_path),
               "marker path too long for %s", cases[i].label);
+        CHECK(make_dir_recursive("mock_sdcard/Roms/.media"),
+              "mkdir root media failed for %s", cases[i].label);
+        CHECK(snprintf(old_thumb_path, sizeof(old_thumb_path),
+                       "mock_sdcard/Roms/.media/%s.png", old_folder_name) <
+              (int)sizeof(old_thumb_path),
+              "old thumbnail path too long for %s", cases[i].label);
+        CHECK(snprintf(new_thumb_path, sizeof(new_thumb_path),
+                       "mock_sdcard/Roms/.media/%s.png", new_folder_name) <
+              (int)sizeof(new_thumb_path),
+              "new thumbnail path too long for %s", cases[i].label);
         CHECK(write_file(old_m3u_path, "../Console (TAG)/Old Name.zip"),
               "write m3u fixture failed for %s", cases[i].label);
+        CHECK(write_file(old_thumb_path, "THUMB"),
+              "write root thumbnail fixture failed for %s", cases[i].label);
         {
             char marker_path[SC_MAX_PATH * 2];
             CHECK(snprintf(marker_path, sizeof(marker_path), "%s/.shortcut",
@@ -1151,6 +1185,10 @@ static bool test_rename_shortcut_updates_layout_for_all_positions(void)
               "new m3u missing for %s", cases[i].label);
         CHECK(file_contents_equal(new_marker_path, new_display),
               "marker not updated for %s", cases[i].label);
+        CHECK(!path_exists(old_thumb_path),
+              "old root thumbnail still exists for %s", cases[i].label);
+        CHECK(file_contents_equal(new_thumb_path, "THUMB"),
+              "new root thumbnail missing for %s", cases[i].label);
     }
 
     ok = true;

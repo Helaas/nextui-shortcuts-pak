@@ -1727,6 +1727,122 @@ static bool build_rom_art_src_path(const rom_file *rom, char *out,
            append_cstr_exact(out, out_size, ".png");
 }
 
+static bool build_root_media_dir(char *out, size_t out_size)
+{
+    char roms_dir[SC_MAX_PATH];
+
+    get_roms_path(roms_dir, sizeof(roms_dir));
+    return join_path(out, out_size, roms_dir, ".media");
+}
+
+static bool build_shortcut_thumbnail_path(const char *shortcut_name,
+                                          char *out, size_t out_size)
+{
+    char media_dir[SC_MAX_PATH * 2];
+
+    if (!shortcut_name || shortcut_name[0] == '\0')
+        return false;
+    return build_root_media_dir(media_dir, sizeof(media_dir)) &&
+           join_path_with_suffix(out, out_size, media_dir, shortcut_name,
+                                 ".png");
+}
+
+static int copy_binary_file(const char *src, const char *dst)
+{
+    FILE *in = NULL;
+    FILE *out = NULL;
+    unsigned char buf[8192];
+    int rc = -1;
+
+    if (!src || !dst || strcmp(src, dst) == 0)
+        return src && dst ? 0 : -1;
+
+    in = fopen(src, "rb");
+    if (!in)
+        goto cleanup;
+
+    out = fopen(dst, "wb");
+    if (!out)
+        goto cleanup;
+
+    for (;;) {
+        size_t n = fread(buf, 1, sizeof(buf), in);
+        if (n > 0 && fwrite(buf, 1, n, out) != n)
+            goto cleanup;
+        if (n == 0)
+            break;
+        if (ferror(in))
+            goto cleanup;
+    }
+    if (ferror(in))
+        goto cleanup;
+
+    if (fclose(out) != 0) {
+        out = NULL;
+        goto cleanup;
+    }
+    out = NULL;
+    rc = 0;
+
+cleanup:
+    if (out) fclose(out);
+    if (in) fclose(in);
+    return rc;
+}
+
+int remove_shortcut_thumbnail(const char *shortcut_name)
+{
+    char thumb_path[SC_MAX_PATH * 2];
+
+    if (!build_shortcut_thumbnail_path(shortcut_name, thumb_path,
+                                       sizeof(thumb_path)))
+        return -1;
+    if (unlink(thumb_path) == 0 || errno == ENOENT)
+        return 0;
+    return -1;
+}
+
+static int rename_shortcut_thumbnail(const char *old_name,
+                                     const char *new_name)
+{
+    char old_path[SC_MAX_PATH * 2];
+    char new_path[SC_MAX_PATH * 2];
+
+    if (!old_name || !new_name || strcmp(old_name, new_name) == 0)
+        return 0;
+    if (!build_shortcut_thumbnail_path(old_name, old_path,
+                                       sizeof(old_path)) ||
+        !build_shortcut_thumbnail_path(new_name, new_path,
+                                       sizeof(new_path)))
+        return -1;
+    if (rename(old_path, new_path) == 0 || errno == ENOENT)
+        return 0;
+    return -1;
+}
+
+int sync_shortcut_thumbnail(const char *shortcut_name,
+                            const char *art_src_path)
+{
+    char media_dir[SC_MAX_PATH * 2];
+    char thumb_path[SC_MAX_PATH * 2];
+    struct stat st;
+
+    if (!build_shortcut_thumbnail_path(shortcut_name, thumb_path,
+                                       sizeof(thumb_path)))
+        return -1;
+
+    if (!art_src_path || stat(art_src_path, &st) != 0 ||
+        !S_ISREG(st.st_mode)) {
+        return remove_shortcut_thumbnail(shortcut_name);
+    }
+
+    if (!build_root_media_dir(media_dir, sizeof(media_dir)) ||
+        ensure_dir_exists(media_dir) != 0)
+        return -1;
+
+    return copy_binary_file(art_src_path, thumb_path);
+}
+
 /* ── Shortcut creation ────────────────────────────────────────── */
 
 int create_rom_shortcut(const char *display_name, const char *tag,
@@ -1802,6 +1918,8 @@ int create_rom_shortcut(const char *display_name, const char *tag,
         artwork_bg_params(settings, &use_bg, &write_when_missing_art);
         generate_artwork_bg(art_src, folder_path, use_bg,
                             write_when_missing_art, get_theme_bg_color());
+        if (sync_shortcut_thumbnail(folder_name, art_src) != 0)
+            ap_log("create_rom_shortcut: failed to sync root thumbnail");
     }
 
     ap_log("create_rom_shortcut: created folder=%s", folder_path);
@@ -1861,6 +1979,8 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
         artwork_bg_params(settings, &use_bg, &write_when_missing_art);
         generate_artwork_bg(art_src, folder_path, use_bg,
                             write_when_missing_art, get_theme_bg_color());
+        if (sync_shortcut_thumbnail(folder_name, art_src) != 0)
+            ap_log("create_tool_shortcut: failed to sync root thumbnail");
     }
 
     ap_log("create_tool_shortcut: created folder=%s", folder_path);
@@ -1874,6 +1994,10 @@ int remove_shortcut(const char *shortcut_path)
     struct stat st;
     if (lstat(shortcut_path, &st) != 0)
         return -1;
+    const char *shortcut_name = strrchr(shortcut_path, '/');
+    shortcut_name = shortcut_name ? shortcut_name + 1 : shortcut_path;
+    if (remove_shortcut_thumbnail(shortcut_name) != 0)
+        ap_log("remove_shortcut: failed to remove root thumbnail");
     if (S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode))
         return unlink(shortcut_path);
 
@@ -1962,6 +2086,9 @@ int rename_shortcut(const shortcut_entry *sc, const char *new_display)
         rename(new_folder_path, sc->path);
         return -1;
     }
+
+    if (rename_shortcut_thumbnail(sc->name, new_folder_name) != 0)
+        ap_log("rename_shortcut: thumbnail rename failed");
 
     ap_log("rename_shortcut: done -> %s", new_folder_path);
     return 0;

@@ -175,6 +175,9 @@ int create_rom_shortcut(const char *display_name, const char *tag,
                         const app_settings *settings);
 int create_tool_shortcut(const char *display_name, const char *pak_path,
                          sc_position pos, const app_settings *settings);
+int sync_shortcut_thumbnail(const char *shortcut_name,
+                            const char *art_src_path);
+int remove_shortcut_thumbnail(const char *shortcut_name);
 int remove_shortcut(const char *shortcut_path);
 int rename_shortcut(const shortcut_entry *sc, const char *new_display);
 bool shortcut_exists(const char *display_name, const char *tag);

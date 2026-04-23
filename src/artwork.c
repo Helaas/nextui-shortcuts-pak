@@ -335,6 +335,9 @@ int regenerate_all_media(const app_settings *settings)
         shortcut_art_src_path(&shortcuts[i], art_src, sizeof(art_src));
         generate_artwork_bg(art_src, shortcuts[i].path, use_bg,
                             write_when_missing_art, bg_color);
+        if (sync_shortcut_thumbnail(shortcuts[i].name, art_src) != 0)
+            ap_log("regenerate_all_media: thumbnail sync failed for %s",
+                   shortcuts[i].name);
     }
 
     ap_log("regenerate_all_media: processed %d shortcuts in %ums",
@@ -361,6 +364,10 @@ int remove_all_media(void)
         snprintf(media_dir, sizeof(media_dir), "%s/.media",
                  shortcuts[i].path);
         rmdir(media_dir); /* Silently fails if not empty. */
+
+        if (remove_shortcut_thumbnail(shortcuts[i].name) != 0)
+            ap_log("remove_all_media: thumbnail remove failed for %s",
+                   shortcuts[i].name);
     }
 
     ap_log("remove_all_media: processed %d shortcuts", count);
