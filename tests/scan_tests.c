@@ -804,6 +804,102 @@ static bool test_mapped_shortcut_creation_preserves_raw_targets_and_artwork(void
           "mapped root thumbnail path too long");
     CHECK(file_contents_equal(root_thumb_path, "PNGDATA"),
           "mapped root thumbnail was not copied from source art");
+    reset_generate_artwork_bg_stub();
+    CHECK(regenerate_all_media(&settings) == 0,
+          "regenerate_all_media failed for disabled mapped rom");
+    CHECK(g_generate_artwork_bg_call_count == 1,
+          "expected one regenerated artwork call, got %d",
+          g_generate_artwork_bg_call_count);
+    CHECK(ends_with(g_last_generated_art_src_path,
+                    "/mock_sdcard/Roms/Arcade (ARC).disabled/.media/kof98.png"),
+          "unexpected regenerated disabled art src path: %s",
+          g_last_generated_art_src_path);
+    CHECK(file_contents_equal(root_thumb_path, "PNGDATA"),
+          "regenerate removed disabled mapped root thumbnail");
+
+    ok = true;
+
+cleanup:
+    free(shortcuts);
+    free(roms);
+    free(consoles);
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_regenerate_disabled_multidisc_uses_console_artwork(void)
+{
+    test_env env = {0};
+    console_dir *consoles = NULL;
+    rom_file *roms = NULL;
+    shortcut_entry *shortcuts = NULL;
+    int count = 0;
+    bool ok = false;
+    const console_dir *console = NULL;
+    const rom_file *rom = NULL;
+    const shortcut_entry *shortcut = NULL;
+    app_settings settings = {
+        .copy_artwork = true,
+        .artwork_mode = ART_MODE_BLACK,
+        .show_hidden = true,
+    };
+    char root_thumb_path[SC_MAX_PATH * 2];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(make_dir_recursive("mock_sdcard/Roms/PlayStation (PS).disabled/.media"),
+          "mkdir disabled playstation media failed");
+    CHECK(make_dir_recursive("mock_sdcard/Roms/PlayStation (PS).disabled/Final Fantasy VII.disabled"),
+          "mkdir disabled multidisc fixture failed");
+    CHECK(write_file("mock_sdcard/Roms/PlayStation (PS).disabled/Final Fantasy VII.disabled/Final Fantasy VII.m3u",
+                     "disc1.chd\n"),
+          "create disabled multidisc companion failed");
+    CHECK(write_file("mock_sdcard/Roms/PlayStation (PS).disabled/.media/Final Fantasy VII.png",
+                     "MULTIART"),
+          "create disabled multidisc source art failed");
+
+    CHECK(scan_console_dirs(true, &consoles, &count) == 0,
+          "scan_console_dirs(true) failed");
+    console = find_console_by_name(consoles, count,
+                                   "PlayStation (PS).disabled");
+    CHECK(console != NULL, "missing disabled playstation console");
+
+    CHECK(scan_roms(console->path, true, &roms, &count) == 0,
+          "scan_roms(true) failed");
+    rom = find_rom_by_name(roms, count, "Final Fantasy VII.disabled");
+    CHECK(rom != NULL && rom->is_multi_disc,
+          "missing disabled multidisc rom");
+    CHECK(strcmp(rom->source_stem, "Final Fantasy VII") == 0,
+          "unexpected disabled multidisc source stem: %s",
+          rom->source_stem);
+
+    reset_generate_artwork_bg_stub();
+    CHECK(create_rom_shortcut(rom->display, console->tag, rom,
+                              SC_POS_ALPHA, &settings) == 0,
+          "create_rom_shortcut failed for disabled multidisc rom");
+
+    CHECK(scan_shortcuts(&shortcuts, &count) == 0,
+          "scan_shortcuts failed");
+    shortcut = find_shortcut_by_display(shortcuts, count, "Final Fantasy VII");
+    CHECK(shortcut != NULL, "missing disabled multidisc shortcut");
+    CHECK(snprintf(root_thumb_path, sizeof(root_thumb_path),
+                   "mock_sdcard/Roms/.media/%s.png", shortcut->name) <
+          (int)sizeof(root_thumb_path),
+          "disabled multidisc root thumbnail path too long");
+    CHECK(file_contents_equal(root_thumb_path, "MULTIART"),
+          "disabled multidisc root thumbnail was not copied from source art");
+
+    reset_generate_artwork_bg_stub();
+    CHECK(regenerate_all_media(&settings) == 0,
+          "regenerate_all_media failed for disabled multidisc rom");
+    CHECK(g_generate_artwork_bg_call_count == 1,
+          "expected one regenerated multidisc artwork call, got %d",
+          g_generate_artwork_bg_call_count);
+    CHECK(ends_with(g_last_generated_art_src_path,
+                    "/mock_sdcard/Roms/PlayStation (PS).disabled/.media/Final Fantasy VII.png"),
+          "unexpected regenerated disabled multidisc art src path: %s",
+          g_last_generated_art_src_path);
+    CHECK(file_contents_equal(root_thumb_path, "MULTIART"),
+          "regenerate removed disabled multidisc root thumbnail");
 
     ok = true;
 
@@ -1346,6 +1442,7 @@ int main(void)
         { "collection console labels include tags", test_collection_console_labels_include_tags },
         { "map.txt resolves rom titles", test_map_txt_resolves_rom_titles },
         { "mapped shortcut creation preserves raw targets and artwork", test_mapped_shortcut_creation_preserves_raw_targets_and_artwork },
+        { "regenerate disabled multidisc uses console artwork", test_regenerate_disabled_multidisc_uses_console_artwork },
         { "slash-mapped shortcut creation uses storage-safe names", test_slash_mapped_shortcut_creation_uses_storage_safe_names },
         { "ports .ports dir always hidden", test_ports_dotports_always_hidden },
         { "tool names preserve internal pak suffixes", test_tool_names_preserve_internal_pak_suffixes },
