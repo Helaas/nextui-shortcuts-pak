@@ -284,26 +284,6 @@ static bool format_console_display_name(const char *name,
     return copy_fmt_exact(out, out_size, "%s (%s)", display, tag);
 }
 
-/* build_folder_name: construct prefixed shortcut folder name.
- * Returns false if the result was truncated. */
-bool build_folder_name(sc_position pos, const char *display, const char *tag,
-                       char *out, int out_size)
-{
-    int n;
-    switch (pos) {
-    case SC_POS_TOP:
-        n = snprintf(out, out_size, TOP_PREFIX "%s (%s)", display, tag);
-        break;
-    case SC_POS_ALPHA:
-        n = snprintf(out, out_size, "%s (%s)", display, tag);
-        break;
-    default: /* SC_POS_BOTTOM */
-        n = snprintf(out, out_size, SHORTCUT_PREFIX "%s (%s)", display, tag);
-        break;
-    }
-    return n >= 0 && n < out_size;
-}
-
 static bool strip_shortcut_sort_prefix(char *name)
 {
     if (!name) return false;
@@ -626,10 +606,12 @@ static bool load_rom_title_map(const char *console_path, rom_title_map *out)
         char *key;
         char *value;
 
-        if (next) {
+        if (next)
             *next = '\0';
-            if (next > line && next[-1] == '\r')
-                next[-1] = '\0';
+        {
+            size_t len = strlen(line);
+            if (len > 0 && line[len - 1] == '\r')
+                line[len - 1] = '\0';
         }
 
         key = line;
@@ -1831,10 +1813,19 @@ int sync_shortcut_thumbnail(const char *shortcut_name,
                                        sizeof(thumb_path)))
         return -1;
 
-    if (!art_src_path || stat(art_src_path, &st) != 0 ||
-        !S_ISREG(st.st_mode)) {
+    if (!art_src_path)
         return remove_shortcut_thumbnail(shortcut_name);
+
+    if (stat(art_src_path, &st) != 0) {
+        if (errno == ENOENT)
+            return remove_shortcut_thumbnail(shortcut_name);
+        ap_log("sync_shortcut_thumbnail: stat(%s) failed errno=%d",
+               art_src_path, errno);
+        return -1;
     }
+
+    if (!S_ISREG(st.st_mode))
+        return remove_shortcut_thumbnail(shortcut_name);
 
     if (!build_root_media_dir(media_dir, sizeof(media_dir)) ||
         ensure_dir_exists(media_dir) != 0)

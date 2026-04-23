@@ -11,9 +11,24 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-/* build_folder_name is no longer public API but still used by test fixtures. */
-extern bool build_folder_name(sc_position pos, const char *display,
-                              const char *tag, char *out, int out_size);
+static bool build_folder_name(sc_position pos, const char *display,
+                              const char *tag, char *out, int out_size)
+{
+    int n;
+    switch (pos) {
+    case SC_POS_TOP:
+        n = snprintf(out, out_size, TOP_PREFIX "%s (%s)", display, tag);
+        break;
+    case SC_POS_ALPHA:
+        n = snprintf(out, out_size, "%s (%s)", display, tag);
+        break;
+    default:
+        n = snprintf(out, out_size, SHORTCUT_PREFIX "%s (%s)", display, tag);
+        break;
+    }
+    return n >= 0 && n < out_size;
+}
+
 extern char g_last_generated_art_src_path[];
 extern char g_last_generated_art_dest_folder[];
 extern int g_generate_artwork_bg_call_count;
@@ -601,6 +616,7 @@ static bool test_map_txt_resolves_rom_titles(void)
     const rom_file *multi = NULL;
     const rom_file *cue = NULL;
     const rom_file *unmapped = NULL;
+    const rom_file *crend = NULL;
     static const char map_contents[] =
         "\xEF\xBB\xBF"
         "kof98.zip\tThe King of Fighters '98\n"
@@ -610,7 +626,8 @@ static bool test_map_txt_resolves_rom_titles(void)
         "Last Blade.cue\tThe Last Blade\n"
         "malformed line\n"
         "\tblank key\n"
-        "blank value\t\n";
+        "blank value\t\n"
+        "crend.zip\tCR End Title\r";
 
     CHECK(setup_test_env(&env), "setup failed");
     CHECK(make_dir_recursive("mock_sdcard/Roms/Arcade (ARC)"),
@@ -625,6 +642,8 @@ static bool test_map_txt_resolves_rom_titles(void)
           "create samsho rom failed");
     CHECK(touch_file("mock_sdcard/Roms/Arcade (ARC)/unmapped.zip"),
           "create unmapped rom failed");
+    CHECK(touch_file("mock_sdcard/Roms/Arcade (ARC)/crend.zip"),
+          "create crend rom failed");
     CHECK(write_file("mock_sdcard/Roms/Arcade (ARC)/Metal Slug/Metal Slug.m3u",
                      "disc1.chd\n"),
           "create multidisc companion failed");
@@ -643,18 +662,22 @@ static bool test_map_txt_resolves_rom_titles(void)
 
     CHECK(scan_roms(console->path, false, &roms, &count) == 0,
           "scan_roms(false) failed");
-    CHECK(count == 5, "expected five rom entries, got %d", count);
+    CHECK(count == 6, "expected six rom entries, got %d", count);
 
     kof = find_rom_by_name(roms, count, "kof98.zip");
     samsho = find_rom_by_name(roms, count, "samsho.zip");
     multi = find_rom_by_name(roms, count, "Metal Slug");
     cue = find_rom_by_name(roms, count, "Last Blade");
     unmapped = find_rom_by_name(roms, count, "unmapped.zip");
+    crend = find_rom_by_name(roms, count, "crend.zip");
     CHECK(kof != NULL, "missing kof rom");
     CHECK(samsho != NULL, "missing samsho rom");
     CHECK(multi != NULL && multi->is_multi_disc, "missing mapped multidisc rom");
     CHECK(cue != NULL && cue->is_cue_folder, "missing mapped cue rom");
     CHECK(unmapped != NULL, "missing unmapped rom");
+    CHECK(crend != NULL, "missing crend rom");
+    CHECK(strcmp(crend->display, "CR End Title") == 0,
+          "trailing CR not stripped from mapped title: %s", crend->display);
 
     CHECK(strcmp(kof->display, "The King of Fighters '98") == 0,
           "unexpected kof display: %s", kof->display);
