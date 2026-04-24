@@ -15,6 +15,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 /* ── String utilities ─────────────────────────────────────────── */
@@ -78,6 +79,12 @@ static bool append_cstr_exact(char *out, size_t out_size, const char *suffix)
         memcpy(out + out_len, suffix, suffix_len);
     out[out_len + suffix_len] = '\0';
     return true;
+}
+
+static bool append_char_exact(char *out, size_t out_size, char ch)
+{
+    char suffix[2] = { ch, '\0' };
+    return append_cstr_exact(out, out_size, suffix);
 }
 
 static bool strip_trailing_suffix(char *str, const char *suffix)
@@ -173,6 +180,25 @@ static void copy_with_suffix_trunc(char *out, size_t out_size,
     out[src_len + suffix_len] = '\0';
 }
 
+static bool copy_fmt_exact(char *out, size_t out_size, const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    if (!out || out_size == 0 || !fmt)
+        return false;
+
+    va_start(ap, fmt);
+    n = vsnprintf(out, out_size, fmt, ap);
+    va_end(ap);
+
+    if (n < 0 || (size_t)n >= out_size) {
+        out[0] = '\0';
+        return false;
+    }
+    return true;
+}
+
 /* extract_tag: "Game Boy Advance (GBA)" -> "GBA" */
 void extract_tag(const char *name, char *out, int out_size)
 {
@@ -240,24 +266,130 @@ void strip_extension(const char *name, char *out, int out_size)
     copy_cstr_trunc(out, (size_t)out_size, name);
 }
 
-/* build_folder_name: construct prefixed shortcut folder name.
- * Returns false if the result was truncated. */
-bool build_folder_name(sc_position pos, const char *display, const char *tag,
-                       char *out, int out_size)
+static bool format_console_display_name(const char *name,
+                                        char *out, size_t out_size)
 {
-    int n;
-    switch (pos) {
-    case SC_POS_TOP:
-        n = snprintf(out, out_size, TOP_PREFIX "%s (%s)", display, tag);
-        break;
-    case SC_POS_ALPHA:
-        n = snprintf(out, out_size, "%s (%s)", display, tag);
-        break;
-    default: /* SC_POS_BOTTOM */
-        n = snprintf(out, out_size, SHORTCUT_PREFIX "%s (%s)", display, tag);
-        break;
+    char tag[SC_MAX_TAG];
+    char display[SC_MAX_DISPLAY];
+
+    if (!name || !out || out_size == 0)
+        return false;
+
+    extract_tag(name, tag, sizeof(tag));
+    if (tag[0] == '\0') {
+        copy_cstr_trunc(out, out_size, name);
+        return true;
     }
-    return n >= 0 && n < out_size;
+
+    extract_display_name(name, display, sizeof(display));
+    return copy_fmt_exact(out, out_size, "%s (%s)", display, tag);
+}
+
+static void strip_shortcut_sort_prefix(char *name)
+{
+    if (!name) return;
+
+    if (starts_with(name, SHORTCUT_PREFIX)) {
+        memmove(name, name + SHORTCUT_PREFIX_LEN,
+                strlen(name + SHORTCUT_PREFIX_LEN) + 1);
+    } else if (starts_with(name, LEGACY_PREFIX)) {
+        memmove(name, name + LEGACY_PREFIX_LEN,
+                strlen(name + LEGACY_PREFIX_LEN) + 1);
+    }
+}
+
+static int hex_value(char ch)
+{
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    return -1;
+}
+
+static bool append_encoded_shortcut_display(char *out, size_t out_size,
+                                            const char *display)
+{
+    const unsigned char *p = (const unsigned char *)display;
+
+    if (!display) return true;
+
+    for (; *p; p++) {
+        if (*p == '%') {
+            if (!append_cstr_exact(out, out_size, "%25"))
+                return false;
+        } else if (*p == '/') {
+            if (!append_cstr_exact(out, out_size, "%2F"))
+                return false;
+        } else if (!append_char_exact(out, out_size, (char)*p)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Inverse of append_encoded_shortcut_display: only %25 and %2F are encoded,
+ * so this decoder is intentionally narrow. */
+static bool decode_shortcut_storage_display(const char *encoded,
+                                            char *out, size_t out_size)
+{
+    size_t pos = 0;
+
+    if (!out || out_size == 0) return false;
+    out[0] = '\0';
+    if (!encoded) return true;
+
+    for (size_t i = 0; encoded[i] != '\0'; i++) {
+        char decoded = '\0';
+
+        if (encoded[i] == '%' &&
+            encoded[i + 1] != '\0' &&
+            encoded[i + 2] != '\0') {
+            int hi = hex_value(encoded[i + 1]);
+            int lo = hex_value(encoded[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                int value = (hi << 4) | lo;
+                if (value == '%' || value == '/') {
+                    decoded = (char)value;
+                    i += 2;
+                }
+            }
+        }
+
+        if (decoded == '\0')
+            decoded = encoded[i];
+
+        if (pos + 1 >= out_size) {
+            out[0] = '\0';
+            return false;
+        }
+        out[pos++] = decoded;
+    }
+
+    out[pos] = '\0';
+    return true;
+}
+
+static bool build_shortcut_storage_name(sc_position pos,
+                                        const char *display,
+                                        const char *tag,
+                                        char *out, size_t out_size)
+{
+    const char *prefix = "";
+
+    if (!out || out_size == 0 || !tag) return false;
+    out[0] = '\0';
+
+    switch (pos) {
+    case SC_POS_TOP:    prefix = TOP_PREFIX; break;
+    case SC_POS_BOTTOM: prefix = SHORTCUT_PREFIX; break;
+    default:            prefix = ""; break;
+    }
+
+    return append_cstr_exact(out, out_size, prefix) &&
+           append_encoded_shortcut_display(out, out_size, display) &&
+           append_cstr_exact(out, out_size, " (") &&
+           append_cstr_exact(out, out_size, tag) &&
+           append_cstr_exact(out, out_size, ")");
 }
 
 bool is_hidden(const char *name)
@@ -378,6 +510,148 @@ static bool is_multi_disc_dir(const char *dir_path, const char *base_name)
 static bool is_cue_folder_dir(const char *dir_path, const char *base_name)
 {
     return dir_has_named_companion(dir_path, base_name, ".cue");
+}
+
+static void *grow_array(void *arr, int *cap, int count, size_t elem_size);
+
+typedef struct {
+    char *key;
+    char *value;
+} rom_title_map_entry;
+
+typedef struct {
+    rom_title_map_entry *entries;
+    int count;
+    int cap;
+} rom_title_map;
+
+static void free_rom_title_map(rom_title_map *map)
+{
+    if (!map) return;
+
+    for (int i = 0; i < map->count; i++) {
+        free(map->entries[i].key);
+        free(map->entries[i].value);
+    }
+    free(map->entries);
+    map->entries = NULL;
+    map->count = 0;
+    map->cap = 0;
+}
+
+static bool append_rom_title_map_entry(rom_title_map *map,
+                                       const char *key,
+                                       const char *value)
+{
+    char *dup_key;
+    char *dup_value;
+
+    if (!map || !key || !value || key[0] == '\0' || value[0] == '\0')
+        return true;
+
+    map->entries = grow_array(map->entries, &map->cap, map->count,
+                              sizeof(*map->entries));
+    if (map->count >= map->cap)
+        return false;
+
+    dup_key = strdup(key);
+    dup_value = strdup(value);
+    if (!dup_key || !dup_value) {
+        free(dup_key);
+        free(dup_value);
+        return false;
+    }
+
+    map->entries[map->count].key = dup_key;
+    map->entries[map->count].value = dup_value;
+    map->count++;
+    return true;
+}
+
+static const char *lookup_rom_title(const rom_title_map *map, const char *key)
+{
+    if (!map || !key || key[0] == '\0')
+        return NULL;
+
+    for (int i = map->count - 1; i >= 0; i--) {
+        if (strcmp(map->entries[i].key, key) == 0)
+            return map->entries[i].value;
+    }
+    return NULL;
+}
+
+static bool load_rom_title_map(const char *console_path, rom_title_map *out)
+{
+    char map_path[SC_MAX_PATH * 2];
+    char *data;
+    char *line;
+    bool ok = true;
+    bool first_line = true;
+
+    if (!out)
+        return false;
+    out->entries = NULL;
+    out->count = 0;
+    out->cap = 0;
+
+    if (!join_path(map_path, sizeof(map_path), console_path, "map.txt"))
+        return false;
+
+    data = read_text_file(map_path);
+    if (!data)
+        return true;
+
+    line = data;
+    while (line && *line) {
+        char *next = strchr(line, '\n');
+        char *tab;
+        char *key;
+        char *value;
+
+        if (next)
+            *next = '\0';
+        {
+            size_t len = strlen(line);
+            if (len > 0 && line[len - 1] == '\r')
+                line[len - 1] = '\0';
+        }
+
+        key = line;
+        if (first_line &&
+            (unsigned char)key[0] == 0xEF &&
+            (unsigned char)key[1] == 0xBB &&
+            (unsigned char)key[2] == 0xBF) {
+            key += 3;
+        }
+        first_line = false;
+
+        tab = strchr(key, '\t');
+        if (tab) {
+            *tab = '\0';
+            value = tab + 1;
+            if (key[0] != '\0' && value[0] != '\0' &&
+                !append_rom_title_map_entry(out, key, value)) {
+                ok = false;
+                break;
+            }
+        }
+
+        line = next ? next + 1 : NULL;
+    }
+
+    free(data);
+    if (!ok)
+        free_rom_title_map(out);
+    return ok;
+}
+
+static void resolve_rom_display(const rom_title_map *map,
+                                const char *lookup_key,
+                                const char *fallback,
+                                char *out, size_t out_size)
+{
+    const char *mapped = lookup_rom_title(map, lookup_key);
+    copy_cstr_trunc(out, out_size, mapped ? mapped : fallback);
 }
 
 bool is_shortcut_folder(const char *folder_path)
@@ -675,6 +949,124 @@ void get_screen_dimensions(int *w, int *h)
 #endif
 }
 
+/* ── Theme background color ──────────────────────────────────── */
+
+static sc_color hex_to_sc_color(const char *hex)
+{
+    sc_color c = {0, 0, 0, 255};
+    if (!hex || !hex[0]) return c;
+    if (hex[0] == '#') hex++;
+    else if (hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X')) hex += 2;
+    unsigned long val = strtoul(hex, NULL, 16);
+    c.r = (uint8_t)((val >> 16) & 0xFF);
+    c.g = (uint8_t)((val >>  8) & 0xFF);
+    c.b = (uint8_t)( val        & 0xFF);
+    return c;
+}
+
+sc_color get_theme_bg_color(void)
+{
+    /* Cached for the process lifetime — regenerating artwork after an
+     * in-session theme change requires restarting the app. */
+    static sc_color cached = {0, 0, 0, 255};
+    static bool loaded = false;
+    if (loaded) return cached;
+    loaded = true;
+
+#if defined(PLATFORM_MAC)
+    return cached; /* No nextval.elf on macOS dev builds. */
+#else
+    /* Find nextval.elf: prefer SYSTEM_PATH env, fall back to platform path. */
+    const char *nextval_path = NULL;
+    char nextval_env_buf[256] = {0};
+    const char *system_path = getenv("SYSTEM_PATH");
+    if (system_path && system_path[0]) {
+        snprintf(nextval_env_buf, sizeof(nextval_env_buf),
+                 "%s/bin/nextval.elf", system_path);
+        if (access(nextval_env_buf, X_OK) == 0)
+            nextval_path = nextval_env_buf;
+    }
+    if (!nextval_path) {
+        static const char *fallback =
+            "/mnt/SDCARD/.system/" PLATFORM_SUBDIR "/bin/nextval.elf";
+        if (access(fallback, X_OK) == 0)
+            nextval_path = fallback;
+    }
+    if (!nextval_path) {
+        ap_log("get_theme_bg_color: nextval.elf not found, using black");
+        return cached;
+    }
+
+    /* Spawn nextval.elf via fork/execv (no shell) so SYSTEM_PATH contents
+     * cannot be interpreted as shell metacharacters. */
+    int pipefd[2];
+    if (pipe(pipefd) != 0) {
+        ap_log("get_theme_bg_color: pipe() failed errno=%d", errno);
+        return cached;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        ap_log("get_theme_bg_color: fork() failed errno=%d", errno);
+        return cached;
+    }
+    if (pid == 0) {
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[0]);
+        close(pipefd[1]);
+        char *const argv[] = { (char *)nextval_path, NULL };
+        execv(nextval_path, argv);
+        _exit(127);
+    }
+    close(pipefd[1]);
+
+    FILE *fp = fdopen(pipefd[0], "r");
+    if (!fp) {
+        ap_log("get_theme_bg_color: fdopen() failed errno=%d", errno);
+        close(pipefd[0]);
+        waitpid(pid, NULL, 0);
+        return cached;
+    }
+
+    char json_buf[4096] = {0};
+    size_t total = 0;
+    while (total < sizeof(json_buf) - 1) {
+        size_t n = fread(json_buf + total, 1, sizeof(json_buf) - 1 - total, fp);
+        if (n == 0) break;
+        total += n;
+    }
+    json_buf[total] = '\0';
+    fclose(fp);
+    waitpid(pid, NULL, 0);
+
+    if (total == sizeof(json_buf) - 1)
+        ap_log("get_theme_bg_color: nextval output truncated at %zu bytes",
+               total);
+
+    cJSON *json = cJSON_Parse(json_buf);
+    if (!json) {
+        ap_log("get_theme_bg_color: failed to parse nextval output");
+        return cached;
+    }
+
+    /* Prefer color7 (NextUI ≥ PR#661), fall back to legacy bgcolor. */
+    cJSON *color = cJSON_GetObjectItem(json, "color7");
+    if (!cJSON_IsString(color) || !color->valuestring[0])
+        color = cJSON_GetObjectItem(json, "bgcolor");
+
+    if (cJSON_IsString(color) && color->valuestring[0]) {
+        cached = hex_to_sc_color(color->valuestring);
+        ap_log("get_theme_bg_color: %s → r=%u g=%u b=%u",
+               color->valuestring, cached.r, cached.g, cached.b);
+    }
+
+    cJSON_Delete(json);
+    return cached;
+#endif
+}
+
 /* ── Settings (JSON via cJSON) ────────────────────────────────── */
 
 app_settings load_settings(void)
@@ -940,7 +1332,12 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
             ap_log("scan_console_dirs: skipping overlong path %s", full);
             continue;
         }
-        extract_display_name(base_name, c->display, sizeof(c->display));
+        if (!format_console_display_name(base_name, c->display,
+                                         sizeof(c->display))) {
+            ap_log("scan_console_dirs: skipping overlong display %s",
+                   base_name);
+            continue;
+        }
         c->is_disabled = disabled;
         n++;
     }
@@ -956,6 +1353,7 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count)
 
 /* Internal recursive ROM scanner. */
 static int scan_roms_internal(const char *dir_path, bool show_hidden,
+                              const rom_title_map *title_map,
                               rom_file **arr, int *n, int *cap,
                               bool fail_on_open_error)
 {
@@ -989,13 +1387,22 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
                 if (*n >= *cap) { closedir(d); return -1; }
                 rom_file *r = &(*arr)[*n];
+                char lookup_key[SC_MAX_NAME];
                 memset(r, 0, sizeof(*r));
                 copy_cstr_trunc(r->name, sizeof(r->name), name);
                 if (!copy_cstr_exact(r->path, sizeof(r->path), full)) {
                     ap_log("scan_roms: skipping overlong path %s", full);
                     continue;
                 }
-                copy_cstr_trunc(r->display, sizeof(r->display), base_name);
+                copy_cstr_trunc(r->source_stem, sizeof(r->source_stem),
+                                base_name);
+                if (!copy_fmt_exact(lookup_key, sizeof(lookup_key),
+                                    "%s.m3u", base_name)) {
+                    closedir(d);
+                    return -1;
+                }
+                resolve_rom_display(title_map, lookup_key, base_name,
+                                    r->display, sizeof(r->display));
                 r->is_multi_disc = true;
                 r->is_disabled = disabled;
                 (*n)++;
@@ -1006,13 +1413,22 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
                 *arr = grow_array(*arr, cap, *n, sizeof(rom_file));
                 if (*n >= *cap) { closedir(d); return -1; }
                 rom_file *r = &(*arr)[*n];
+                char lookup_key[SC_MAX_NAME];
                 memset(r, 0, sizeof(*r));
                 copy_cstr_trunc(r->name, sizeof(r->name), name);
                 if (!copy_cstr_exact(r->path, sizeof(r->path), full)) {
                     ap_log("scan_roms: skipping overlong path %s", full);
                     continue;
                 }
-                copy_cstr_trunc(r->display, sizeof(r->display), base_name);
+                copy_cstr_trunc(r->source_stem, sizeof(r->source_stem),
+                                base_name);
+                if (!copy_fmt_exact(lookup_key, sizeof(lookup_key),
+                                    "%s.cue", base_name)) {
+                    closedir(d);
+                    return -1;
+                }
+                resolve_rom_display(title_map, lookup_key, base_name,
+                                    r->display, sizeof(r->display));
                 r->is_cue_folder = true;
                 r->is_disabled = disabled;
                 (*n)++;
@@ -1020,7 +1436,8 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
             }
 
             /* Plain subfolder — recurse. */
-            if (scan_roms_internal(full, show_hidden, arr, n, cap, false) != 0) {
+            if (scan_roms_internal(full, show_hidden, title_map,
+                                   arr, n, cap, false) != 0) {
                 closedir(d);
                 return -1;
             }
@@ -1038,7 +1455,9 @@ static int scan_roms_internal(const char *dir_path, bool show_hidden,
             ap_log("scan_roms: skipping overlong path %s", full);
             continue;
         }
-        strip_extension(base_name, r->display, sizeof(r->display));
+        strip_extension(base_name, r->source_stem, sizeof(r->source_stem));
+        resolve_rom_display(title_map, base_name, r->source_stem,
+                            r->display, sizeof(r->display));
         r->is_disabled = disabled;
         (*n)++;
     }
@@ -1051,9 +1470,18 @@ int scan_roms(const char *console_path, bool show_hidden,
 {
     rom_file *arr = NULL;
     int n = 0, cap = 0;
+    rom_title_map title_map = {0};
+    int rc;
 
-    int rc = scan_roms_internal(console_path, show_hidden, &arr, &n, &cap,
-                                true);
+    if (!load_rom_title_map(console_path, &title_map)) {
+        *out = NULL;
+        *count = 0;
+        return -1;
+    }
+
+    rc = scan_roms_internal(console_path, show_hidden, &title_map,
+                            &arr, &n, &cap, true);
+    free_rom_title_map(&title_map);
     if (rc != 0) {
         free(arr);
         *out = NULL;
@@ -1183,15 +1611,12 @@ int scan_shortcuts(shortcut_entry **out, int *count)
             copy_cstr_trunc(display, sizeof(display), marker);
             free(marker);
         } else {
+            char decoded[SC_MAX_DISPLAY];
             extract_display_name(name, display, sizeof(display));
-            /* Strip ZWS or legacy prefix. */
-            if (starts_with(display, SHORTCUT_PREFIX)) {
-                memmove(display, display + SHORTCUT_PREFIX_LEN,
-                        strlen(display + SHORTCUT_PREFIX_LEN) + 1);
-            } else if (starts_with(display, LEGACY_PREFIX)) {
-                memmove(display, display + LEGACY_PREFIX_LEN,
-                        strlen(display + LEGACY_PREFIX_LEN) + 1);
-            }
+            strip_shortcut_sort_prefix(display);
+            if (decode_shortcut_storage_display(display, decoded,
+                                                sizeof(decoded)))
+                copy_cstr_trunc(display, sizeof(display), decoded);
         }
 
         arr = grow_array(arr, &cap, n, sizeof(shortcut_entry));
@@ -1263,17 +1688,200 @@ int scan_shortcuts(shortcut_entry **out, int *count)
     return 0;
 }
 
+bool build_rom_target_path(const rom_file *rom, char *out, int out_size)
+{
+    const char *suffix;
+    const char *stem;
+
+    if (!out || out_size <= 0) return false;
+    out[0] = '\0';
+    if (!rom) return false;
+
+    if (!rom->is_multi_disc && !rom->is_cue_folder)
+        return copy_cstr_exact(out, (size_t)out_size, rom->path);
+
+    suffix = rom->is_multi_disc ? ".m3u" : ".cue";
+    stem = rom->source_stem[0] != '\0' ? rom->source_stem : rom->display;
+    return join_path_with_suffix(out, (size_t)out_size, rom->path,
+                                 stem, suffix);
+}
+
+bool rom_matches_shortcut_target(const rom_file *rom,
+                                 const shortcut_entry *shortcut)
+{
+    char rom_target[SC_MAX_PATH];
+
+    if (!rom || !shortcut || shortcut->target_path[0] == '\0')
+        return false;
+    if (!build_rom_target_path(rom, rom_target, sizeof(rom_target)))
+        return false;
+    return strcmp(rom_target, shortcut->target_path) == 0;
+}
+
+static bool build_rom_art_src_path(const rom_file *rom, char *out,
+                                   size_t out_size)
+{
+    char rom_parent[SC_MAX_PATH];
+    char art_name[SC_MAX_DISPLAY];
+    char *last_slash;
+
+    if (!rom || !out || out_size == 0)
+        return false;
+    out[0] = '\0';
+
+    copy_cstr_trunc(rom_parent, sizeof(rom_parent), rom->path);
+    last_slash = strrchr(rom_parent, '/');
+    if (!last_slash)
+        return false;
+    *last_slash = '\0';
+
+    copy_cstr_trunc(art_name, sizeof(art_name),
+                    rom->source_stem[0] != '\0' ? rom->source_stem
+                                                : rom->display);
+
+    return join_path(out, out_size, rom_parent, ".media") &&
+           append_cstr_exact(out, out_size, "/") &&
+           append_cstr_exact(out, out_size, art_name) &&
+           append_cstr_exact(out, out_size, ".png");
+}
+
+static bool build_root_media_dir(char *out, size_t out_size)
+{
+    char roms_dir[SC_MAX_PATH];
+
+    get_roms_path(roms_dir, sizeof(roms_dir));
+    return join_path(out, out_size, roms_dir, ".media");
+}
+
+static bool build_shortcut_thumbnail_path(const char *shortcut_name,
+                                          char *out, size_t out_size)
+{
+    char media_dir[SC_MAX_PATH * 2];
+
+    if (!shortcut_name || shortcut_name[0] == '\0')
+        return false;
+    return build_root_media_dir(media_dir, sizeof(media_dir)) &&
+           join_path_with_suffix(out, out_size, media_dir, shortcut_name,
+                                 ".png");
+}
+
+static int copy_binary_file(const char *src, const char *dst)
+{
+    FILE *in = NULL;
+    FILE *out = NULL;
+    unsigned char buf[8192];
+    int rc = -1;
+
+    if (!src || !dst) return -1;
+    if (strcmp(src, dst) == 0) return 0;
+
+    in = fopen(src, "rb");
+    if (!in)
+        goto cleanup;
+
+    out = fopen(dst, "wb");
+    if (!out)
+        goto cleanup;
+
+    for (;;) {
+        size_t n = fread(buf, 1, sizeof(buf), in);
+        if (n > 0 && fwrite(buf, 1, n, out) != n)
+            goto cleanup;
+        if (n == 0)
+            break;
+        if (ferror(in))
+            goto cleanup;
+    }
+    if (ferror(in))
+        goto cleanup;
+
+    if (fclose(out) != 0) {
+        out = NULL;
+        goto cleanup;
+    }
+    out = NULL;
+    rc = 0;
+
+cleanup:
+    if (out) fclose(out);
+    if (in) fclose(in);
+    return rc;
+}
+
+int remove_shortcut_thumbnail(const char *shortcut_name)
+{
+    char thumb_path[SC_MAX_PATH * 2];
+
+    if (!build_shortcut_thumbnail_path(shortcut_name, thumb_path,
+                                       sizeof(thumb_path)))
+        return -1;
+    if (unlink(thumb_path) == 0 || errno == ENOENT)
+        return 0;
+    return -1;
+}
+
+static int rename_shortcut_thumbnail(const char *old_name,
+                                     const char *new_name)
+{
+    char old_path[SC_MAX_PATH * 2];
+    char new_path[SC_MAX_PATH * 2];
+
+    if (!old_name || !new_name || strcmp(old_name, new_name) == 0)
+        return 0;
+    if (!build_shortcut_thumbnail_path(old_name, old_path,
+                                       sizeof(old_path)) ||
+        !build_shortcut_thumbnail_path(new_name, new_path,
+                                       sizeof(new_path)))
+        return -1;
+    if (rename(old_path, new_path) == 0 || errno == ENOENT)
+        return 0;
+    return -1;
+}
+
+int sync_shortcut_thumbnail(const char *shortcut_name,
+                            const char *art_src_path)
+{
+    char media_dir[SC_MAX_PATH * 2];
+    char thumb_path[SC_MAX_PATH * 2];
+    struct stat st;
+
+    if (!build_shortcut_thumbnail_path(shortcut_name, thumb_path,
+                                       sizeof(thumb_path)))
+        return -1;
+
+    if (!art_src_path)
+        return remove_shortcut_thumbnail(shortcut_name);
+
+    if (stat(art_src_path, &st) != 0) {
+        if (errno == ENOENT)
+            return remove_shortcut_thumbnail(shortcut_name);
+        ap_log("sync_shortcut_thumbnail: stat(%s) failed errno=%d",
+               art_src_path, errno);
+        return -1;
+    }
+
+    if (!S_ISREG(st.st_mode))
+        return remove_shortcut_thumbnail(shortcut_name);
+
+    if (!build_root_media_dir(media_dir, sizeof(media_dir)) ||
+        ensure_dir_exists(media_dir) != 0)
+        return -1;
+
+    return copy_binary_file(art_src_path, thumb_path);
+}
+
 /* ── Shortcut creation ────────────────────────────────────────── */
 
 int create_rom_shortcut(const char *display_name, const char *tag,
-                        const char *console_dir_name, const rom_file *rom,
-                        sc_position pos, const app_settings *settings)
+                        const rom_file *rom, sc_position pos,
+                        const app_settings *settings)
 {
     char roms_dir[SC_MAX_PATH];
     get_roms_path(roms_dir, sizeof(roms_dir));
 
     char folder_name[SC_MAX_NAME];
-    if (!build_folder_name(pos, display_name, tag, folder_name, sizeof(folder_name)))
+    if (!build_shortcut_storage_name(pos, display_name, tag,
+                                     folder_name, sizeof(folder_name)))
         return -1;
 
     char folder_path[SC_MAX_PATH * 2];
@@ -1302,10 +1910,10 @@ int create_rom_shortcut(const char *display_name, const char *tag,
     int rel_path_len;
     if (rom->is_multi_disc) {
         rel_path_len = snprintf(rel_path, sizeof(rel_path), "../%s/%s.m3u",
-                                rel_from_roms, rom->display);
+                                rel_from_roms, rom->source_stem);
     } else if (rom->is_cue_folder) {
         rel_path_len = snprintf(rel_path, sizeof(rel_path), "../%s/%s.cue",
-                                rel_from_roms, rom->display);
+                                rel_from_roms, rom->source_stem);
     } else {
         rel_path_len = snprintf(rel_path, sizeof(rel_path), "../%s",
                                 rel_from_roms);
@@ -1329,24 +1937,16 @@ int create_rom_shortcut(const char *display_name, const char *tag,
 
     /* Artwork. */
     if (settings->copy_artwork) {
-        /* Source art: <rom_parent_dir>/.media/<rom_display>.png */
         char art_src[SC_MAX_PATH * 2];
-        /* Get the parent directory of the ROM. */
-        char rom_parent[SC_MAX_PATH];
-        copy_cstr_trunc(rom_parent, sizeof(rom_parent), rom->path);
-        char *last_slash = strrchr(rom_parent, '/');
-        if (last_slash) *last_slash = '\0';
-
-        if (!join_path(art_src, sizeof(art_src), rom_parent, ".media") ||
-            !append_cstr_exact(art_src, sizeof(art_src), "/") ||
-            !append_cstr_exact(art_src, sizeof(art_src), rom->display) ||
-            !append_cstr_exact(art_src, sizeof(art_src), ".png"))
+        if (!build_rom_art_src_path(rom, art_src, sizeof(art_src)))
             return -1;
 
         bool use_bg, write_when_missing_art;
         artwork_bg_params(settings, &use_bg, &write_when_missing_art);
         generate_artwork_bg(art_src, folder_path, use_bg,
-                            write_when_missing_art);
+                            write_when_missing_art, get_theme_bg_color());
+        if (sync_shortcut_thumbnail(folder_name, art_src) != 0)
+            ap_log("create_rom_shortcut: failed to sync root thumbnail");
     }
 
     ap_log("create_rom_shortcut: created folder=%s", folder_path);
@@ -1361,8 +1961,8 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
     get_tools_path(tools_dir, sizeof(tools_dir));
 
     char folder_name[SC_MAX_NAME];
-    if (!build_folder_name(pos, display_name, BRIDGE_EMU_TAG,
-                           folder_name, sizeof(folder_name)))
+    if (!build_shortcut_storage_name(pos, display_name, BRIDGE_EMU_TAG,
+                                     folder_name, sizeof(folder_name)))
         return -1;
 
     char folder_path[SC_MAX_PATH * 2];
@@ -1405,7 +2005,9 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
         bool use_bg, write_when_missing_art;
         artwork_bg_params(settings, &use_bg, &write_when_missing_art);
         generate_artwork_bg(art_src, folder_path, use_bg,
-                            write_when_missing_art);
+                            write_when_missing_art, get_theme_bg_color());
+        if (sync_shortcut_thumbnail(folder_name, art_src) != 0)
+            ap_log("create_tool_shortcut: failed to sync root thumbnail");
     }
 
     ap_log("create_tool_shortcut: created folder=%s", folder_path);
@@ -1419,6 +2021,12 @@ int remove_shortcut(const char *shortcut_path)
     struct stat st;
     if (lstat(shortcut_path, &st) != 0)
         return -1;
+    const char *shortcut_name = strrchr(shortcut_path, '/');
+    shortcut_name = shortcut_name ? shortcut_name + 1 : shortcut_path;
+    /* Remove the root thumbnail first; if the folder delete below fails,
+     * the next regenerate will rebuild the thumbnail. */
+    if (remove_shortcut_thumbnail(shortcut_name) != 0)
+        ap_log("remove_shortcut: failed to remove root thumbnail");
     if (S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode))
         return unlink(shortcut_path);
 
@@ -1433,8 +2041,8 @@ bool shortcut_exists(const char *display_name, const char *tag)
     sc_position positions[] = { SC_POS_BOTTOM, SC_POS_TOP, SC_POS_ALPHA };
     for (int i = 0; i < 3; i++) {
         char folder_name[SC_MAX_NAME];
-        if (!build_folder_name(positions[i], display_name, tag,
-                               folder_name, sizeof(folder_name)))
+        if (!build_shortcut_storage_name(positions[i], display_name, tag,
+                                         folder_name, sizeof(folder_name)))
             continue;
         char full[SC_MAX_PATH * 2];
         if (!join_path(full, sizeof(full), roms_dir, folder_name))
@@ -1462,8 +2070,8 @@ int rename_shortcut(const shortcut_entry *sc, const char *new_display)
     sc_position pos = detect_position(sc->name);
 
     char new_folder_name[SC_MAX_NAME];
-    if (!build_folder_name(pos, new_display, sc->tag,
-                           new_folder_name, sizeof(new_folder_name)))
+    if (!build_shortcut_storage_name(pos, new_display, sc->tag,
+                                     new_folder_name, sizeof(new_folder_name)))
         return -1;
 
     char roms_dir[SC_MAX_PATH];
@@ -1507,6 +2115,9 @@ int rename_shortcut(const shortcut_entry *sc, const char *new_display)
         rename(new_folder_path, sc->path);
         return -1;
     }
+
+    if (rename_shortcut_thumbnail(sc->name, new_folder_name) != 0)
+        ap_log("rename_shortcut: thumbnail rename failed");
 
     ap_log("rename_shortcut: done -> %s", new_folder_path);
     return 0;

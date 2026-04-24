@@ -4,6 +4,9 @@ build/
 # Mock SD
 mock_sdcard/
 
+# NextUI cache
+.cache/
+
 # macOS
 .DS_Store
 

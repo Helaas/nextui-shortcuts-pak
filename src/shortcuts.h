@@ -7,6 +7,7 @@
 
 #include <stdbool.h>
 #include <stdarg.h>
+#include <stdint.h>
 
 /* ── Logging (declared here so device.c can be compiled without apostrophe.h
  *    in test builds) ─────────────────────────────────────────── */
@@ -53,8 +54,10 @@ typedef enum {
     SC_POS_ALPHA  = 2,   /* No prefix     — alphabetical */
 } sc_position;
 
+typedef struct { uint8_t r, g, b, a; } sc_color;
+
 typedef enum {
-    ART_MODE_BLACK     = 0,  /* Art on black canvas; always writes bg.png */
+    ART_MODE_BLACK     = 0,  /* Art on theme bg color; always writes bg.png */
     ART_MODE_WALLPAPER = 1,  /* Art on device wallpaper; always writes bg.png */
     ART_MODE_FALLBACK  = 2,  /* Art on wallpaper; skips when no art exists */
 } art_mode;
@@ -79,6 +82,7 @@ typedef struct {
     char name[SC_MAX_NAME];
     char path[SC_MAX_PATH];
     char display[SC_MAX_DISPLAY];
+    char source_stem[SC_MAX_DISPLAY];
     bool is_multi_disc;
     bool is_cue_folder;
     bool is_disabled;
@@ -127,8 +131,9 @@ bool ends_with(const char *str, const char *suffix);
 void extract_tag(const char *name, char *out, int out_size);
 void extract_display_name(const char *name, char *out, int out_size);
 void strip_extension(const char *name, char *out, int out_size);
-bool build_folder_name(sc_position pos, const char *display, const char *tag,
-                       char *out, int out_size);
+bool build_rom_target_path(const rom_file *rom, char *out, int out_size);
+bool rom_matches_shortcut_target(const rom_file *rom,
+                                 const shortcut_entry *shortcut);
 bool is_hidden(const char *name);
 bool is_mac_dotfile(const char *name);
 bool is_shortcut_folder(const char *folder_path);
@@ -166,10 +171,13 @@ int scan_shortcuts(shortcut_entry **out, int *count);
 /* ── device.c — Shortcut CRUD ─────────────────────────────────── */
 
 int create_rom_shortcut(const char *display_name, const char *tag,
-                        const char *console_dir_name, const rom_file *rom,
-                        sc_position pos, const app_settings *settings);
+                        const rom_file *rom, sc_position pos,
+                        const app_settings *settings);
 int create_tool_shortcut(const char *display_name, const char *pak_path,
                          sc_position pos, const app_settings *settings);
+int sync_shortcut_thumbnail(const char *shortcut_name,
+                            const char *art_src_path);
+int remove_shortcut_thumbnail(const char *shortcut_name);
 int remove_shortcut(const char *shortcut_path);
 int rename_shortcut(const shortcut_entry *sc, const char *new_display);
 bool shortcut_exists(const char *display_name, const char *tag);
@@ -181,9 +189,11 @@ void ensure_bridge_emu(void);
 /* ── artwork.c ────────────────────────────────────────────────── */
 
 void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
-                         bool use_global_bg, bool write_when_missing_art);
+                         bool use_global_bg, bool write_when_missing_art,
+                         sc_color bg_color);
 void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size);
 int regenerate_all_media(const app_settings *settings);
+sc_color get_theme_bg_color(void);
 int remove_all_media(void);
 
 /* ── ui.c ─────────────────────────────────────────────────────── */

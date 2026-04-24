@@ -7,18 +7,23 @@
  *
  * Uses SDL2_image for PNG load/save and SDL2 surfaces for compositing.
  */
-#include "apostrophe.h"
 #include "shortcuts.h"
 
+#ifndef TESTING
+#include "apostrophe.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
+#endif
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 /* ── Helpers ──────────────────────────────────────────────────── */
+
+#ifndef TESTING
 
 /* Scale (srcW, srcH) to fit within (maxW, maxH) preserving aspect ratio. */
 static void thumbnail_fit(int srcW, int srcH, int maxW, int maxH,
@@ -97,17 +102,54 @@ static void blit_cover(SDL_Surface *src, SDL_Surface *dst)
     SDL_BlitScaled(src, &srcRect, dst, NULL);
 }
 
+#endif /* !TESTING */
+
+static uint32_t artwork_ticks(void)
+{
+#ifndef TESTING
+    return SDL_GetTicks();
+#else
+    return 0;
+#endif
+}
+
 static uint32_t elapsed_ms(uint32_t start_ms)
 {
-    return SDL_GetTicks() - start_ms;
+    return artwork_ticks() - start_ms;
+}
+
+static bool strip_suffix(char *str, const char *suffix)
+{
+    size_t str_len;
+    size_t suffix_len;
+
+    if (!str || !suffix) return false;
+
+    str_len = strlen(str);
+    suffix_len = strlen(suffix);
+    if (suffix_len > str_len)
+        return false;
+    if (strcmp(str + str_len - suffix_len, suffix) != 0)
+        return false;
+
+    str[str_len - suffix_len] = '\0';
+    return true;
+}
+
+static void strip_disabled_suffix(char *name)
+{
+    (void)strip_suffix(name, ".disabled");
 }
 
 /* ── Main compositing function ────────────────────────────────── */
 
+#ifndef TESTING
+
 void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
-                         bool use_global_bg, bool write_when_missing_art)
+                         bool use_global_bg, bool write_when_missing_art,
+                         sc_color bg_color)
 {
-    uint32_t start_ms = SDL_GetTicks();
+    uint32_t start_ms = artwork_ticks();
     uint32_t art_load_ms = 0;
     uint32_t bg_load_ms = 0;
     uint32_t compose_ms = 0;
@@ -142,9 +184,10 @@ void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
         return;
     }
 
-    /* Fill with opaque black. */
+    /* Fill with theme background color. */
     SDL_FillRect(canvas, NULL,
-                 SDL_MapRGBA(canvas->format, 0, 0, 0, 255));
+                 SDL_MapRGBA(canvas->format, bg_color.r, bg_color.g,
+                             bg_color.b, bg_color.a));
     compose_ms += elapsed_ms(step_ms);
 
     /* Layer 1: global bg.png (scaled to cover, centre-crop). */
@@ -225,6 +268,8 @@ void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
            compose_ms, save_ms, elapsed_ms(start_ms));
 }
 
+#endif /* !TESTING */
+
 /* ── Source art path resolution ────────────────────────────────── */
 
 void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
@@ -297,16 +342,24 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
     /* Derive artwork name from the ROM filename, not the shortcut display
      * name, so that artwork regeneration works for renamed shortcuts. */
     const char *rom_filename = last_slash + 1;
+    char rom_filename_base[SC_MAX_DISPLAY];
     char rom_display[SC_MAX_DISPLAY];
-    strip_extension(rom_filename, rom_display, sizeof(rom_display));
+    snprintf(rom_filename_base, sizeof(rom_filename_base), "%s", rom_filename);
+    strip_disabled_suffix(rom_filename_base);
+    strip_extension(rom_filename_base, rom_display, sizeof(rom_display));
     free(data);
 
     /* Multi-disc / CUE-folder fix: the .m3u relative path has an extra
      * directory level whose name matches the ROM display name.  Artwork
      * lives at the console level, not inside the subfolder. */
     char *parent_last_slash = strrchr(rom_parent_rel, '/');
-    if (parent_last_slash && strcmp(parent_last_slash + 1, rom_display) == 0)
-        *parent_last_slash = '\0';
+    if (parent_last_slash) {
+        char parent_leaf[SC_MAX_DISPLAY];
+        snprintf(parent_leaf, sizeof(parent_leaf), "%s", parent_last_slash + 1);
+        strip_disabled_suffix(parent_leaf);
+        if (strcmp(parent_leaf, rom_display) == 0)
+            *parent_last_slash = '\0';
+    }
 
     char roms_dir[SC_MAX_PATH];
     get_roms_path(roms_dir, sizeof(roms_dir));
@@ -318,7 +371,7 @@ void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size)
 
 int regenerate_all_media(const app_settings *settings)
 {
-    uint32_t start_ms = SDL_GetTicks();
+    uint32_t start_ms = artwork_ticks();
     shortcut_entry *shortcuts = NULL;
     int count = 0;
     if (scan_shortcuts(&shortcuts, &count) != 0)
@@ -326,12 +379,16 @@ int regenerate_all_media(const app_settings *settings)
 
     bool use_bg, write_when_missing_art;
     artwork_bg_params(settings, &use_bg, &write_when_missing_art);
+    sc_color bg_color = get_theme_bg_color();
 
     for (int i = 0; i < count; i++) {
         char art_src[SC_MAX_PATH];
         shortcut_art_src_path(&shortcuts[i], art_src, sizeof(art_src));
         generate_artwork_bg(art_src, shortcuts[i].path, use_bg,
-                            write_when_missing_art);
+                            write_when_missing_art, bg_color);
+        if (sync_shortcut_thumbnail(shortcuts[i].name, art_src) != 0)
+            ap_log("regenerate_all_media: thumbnail sync failed for %s",
+                   shortcuts[i].name);
     }
 
     ap_log("regenerate_all_media: processed %d shortcuts in %ums",
@@ -358,6 +415,10 @@ int remove_all_media(void)
         snprintf(media_dir, sizeof(media_dir), "%s/.media",
                  shortcuts[i].path);
         rmdir(media_dir); /* Silently fails if not empty. */
+
+        if (remove_shortcut_thumbnail(shortcuts[i].name) != 0)
+            ap_log("remove_all_media: thumbnail remove failed for %s",
+                   shortcuts[i].name);
     }
 
     ap_log("remove_all_media: processed %d shortcuts", count);
