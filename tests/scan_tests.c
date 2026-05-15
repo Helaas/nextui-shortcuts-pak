@@ -1398,7 +1398,7 @@ static bool test_resume_hook_install_is_idempotent(void)
         "HELPER=\"${SDCARD_PATH:-/mnt/SDCARD}/Tools/${PLATFORM:-tg5040}/Shortcuts.pak/shortcuts\"\n"
         "[ -x \"$HELPER\" ] || exit 0\n"
         "\n"
-        "LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH:-${SDCARD_PATH:-/mnt/SDCARD}/.system/${PLATFORM:-tg5040}/lib:/usr/miyoo/lib:/usr/miyoo/lib:}\"\n"
+        "LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH:-${SDCARD_PATH:-/mnt/SDCARD}/.system/${PLATFORM:-tg5040}/lib}\"\n"
         "export LD_LIBRARY_PATH\n"
         "\n"
         "LOG_DIR=\"${LOGS_PATH:-${USERDATA_PATH:-${SDCARD_PATH:-/mnt/SDCARD}/.userdata/${PLATFORM:-tg5040}}/logs}\"\n"
