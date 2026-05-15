@@ -143,6 +143,9 @@ bool is_shortcut_folder(const char *folder_path);
 void get_roms_path(char *out, int out_size);
 void get_tools_path(char *out, int out_size);
 void get_emus_path(char *out, int out_size);
+void get_userdata_path(char *out, int out_size);
+void get_shared_userdata_path(char *out, int out_size);
+void get_logs_path(char *out, int out_size);
 void get_settings_path(char *out, int out_size);
 void get_global_bg_path(char *out, int out_size);
 void get_screen_dimensions(int *w, int *h);
@@ -167,6 +170,9 @@ int scan_console_dirs(bool show_hidden, console_dir **out, int *count);
 int scan_roms(const char *console_path, bool show_hidden, rom_file **out, int *count);
 int scan_tools(bool show_hidden, tool_pak **out, int *count);
 int scan_shortcuts(shortcut_entry **out, int *count);
+bool resolve_shortcut_target_path(const char *shortcut_folder_path,
+                                  const char *shortcut_name,
+                                  char *out, int out_size);
 
 /* ── device.c — Shortcut CRUD ─────────────────────────────────── */
 
@@ -185,6 +191,14 @@ bool shortcut_exists(const char *display_name, const char *tag);
 /* ── device.c — Bridge emu ────────────────────────────────────── */
 
 void ensure_bridge_emu(void);
+
+/* ── resume_sync.c ────────────────────────────────────────────── */
+
+int ensure_resume_hook_installed(void);
+int resume_sync_prune_aliases(void);
+int resume_sync_from_hook_env(void);
+int resume_sync_for_shortcut_path(const char *shortcut_path);
+int resume_remove_alias_for_shortcut_path(const char *shortcut_path);
 
 /* ── artwork.c ────────────────────────────────────────────────── */
 

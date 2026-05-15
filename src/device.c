@@ -905,21 +905,83 @@ void get_emus_path(char *out, int out_size)
 #endif
 }
 
-void get_settings_path(char *out, int out_size)
+void get_userdata_path(char *out, int out_size)
 {
 #if defined(PLATFORM_MAC)
     char cwd[SC_MAX_PATH];
     if (getcwd(cwd, sizeof(cwd)))
-        snprintf(out, out_size,
-                 "%s/mock_sdcard/.userdata/shared/Shortcuts/settings.json", cwd);
+        snprintf(out, out_size, "%s/mock_sdcard/.userdata/" PLATFORM_SUBDIR, cwd);
     else
-        snprintf(out, out_size,
-                 "./mock_sdcard/.userdata/shared/Shortcuts/settings.json");
+        snprintf(out, out_size, "./mock_sdcard/.userdata/" PLATFORM_SUBDIR);
 #else
+    const char *userdata = getenv("USERDATA_PATH");
     const char *sd = getenv("SDCARD_PATH");
-    snprintf(out, out_size, "%s/.userdata/shared/Shortcuts/settings.json",
+
+    if (userdata && userdata[0]) {
+        snprintf(out, out_size, "%s", userdata);
+        return;
+    }
+
+    snprintf(out, out_size, "%s/.userdata/" PLATFORM_SUBDIR,
              sd && sd[0] ? sd : "/mnt/SDCARD");
 #endif
+}
+
+void get_shared_userdata_path(char *out, int out_size)
+{
+#if defined(PLATFORM_MAC)
+    char cwd[SC_MAX_PATH];
+    if (getcwd(cwd, sizeof(cwd)))
+        snprintf(out, out_size, "%s/mock_sdcard/.userdata/shared", cwd);
+    else
+        snprintf(out, out_size, "./mock_sdcard/.userdata/shared");
+#else
+    const char *shared = getenv("SHARED_USERDATA_PATH");
+    const char *sd = getenv("SDCARD_PATH");
+
+    if (shared && shared[0]) {
+        snprintf(out, out_size, "%s", shared);
+        return;
+    }
+
+    snprintf(out, out_size, "%s/.userdata/shared",
+             sd && sd[0] ? sd : "/mnt/SDCARD");
+#endif
+}
+
+void get_logs_path(char *out, int out_size)
+{
+#if defined(PLATFORM_MAC)
+    char cwd[SC_MAX_PATH];
+    if (getcwd(cwd, sizeof(cwd)))
+        snprintf(out, out_size, "%s/mock_sdcard/.userdata/" PLATFORM_SUBDIR "/logs", cwd);
+    else
+        snprintf(out, out_size, "./mock_sdcard/.userdata/" PLATFORM_SUBDIR "/logs");
+#else
+    const char *logs = getenv("LOGS_PATH");
+
+    if (logs && logs[0]) {
+        snprintf(out, out_size, "%s", logs);
+        return;
+    }
+
+    char userdata[SC_MAX_PATH];
+    get_userdata_path(userdata, sizeof(userdata));
+    snprintf(out, out_size, "%s/logs", userdata);
+#endif
+}
+
+void get_settings_path(char *out, int out_size)
+{
+    char shared[SC_MAX_PATH];
+    char shortcuts_dir[SC_MAX_PATH];
+
+    get_shared_userdata_path(shared, sizeof(shared));
+    if (!join_path(shortcuts_dir, sizeof(shortcuts_dir), shared, "Shortcuts") ||
+        !join_path(out, (size_t)out_size, shortcuts_dir, "settings.json")) {
+        if (out && out_size > 0)
+            out[0] = '\0';
+    }
 }
 
 void get_global_bg_path(char *out, int out_size)
@@ -1652,29 +1714,10 @@ int scan_shortcuts(shortcut_entry **out, int *count)
                     ap_log("scan_shortcuts: ignoring overlong target for %s", full);
                 free(data);
             }
-        } else {
-            char m3u_file[SC_MAX_PATH * 2];
-            if (!join_path_with_suffix(m3u_file, sizeof(m3u_file), full, name, ".m3u")) {
-                ap_log("scan_shortcuts: m3u path too long for %s", full);
-                n++;
-                continue;
-            }
-            char *data = read_text_file(m3u_file);
-            if (data) {
-                int len = (int)strlen(data);
-                while (len > 0 && (data[len-1] == '\n' || data[len-1] == '\r' ||
-                                    data[len-1] == ' '))
-                    data[--len] = '\0';
-                /* Resolve and normalize the relative path from the shortcut folder. */
-                char joined[SC_MAX_PATH * 2];
-                if (join_path(joined, sizeof(joined), full, data) &&
-                    !normalize_path(joined, sc->target_path,
-                                    sizeof(sc->target_path))) {
-                    ap_log("scan_shortcuts: ignoring overlong normalized target for %s",
-                           full);
-                }
-                free(data);
-            }
+        } else if (!resolve_shortcut_target_path(full, name,
+                                                 sc->target_path,
+                                                 sizeof(sc->target_path))) {
+            ap_log("scan_shortcuts: unable to resolve target for %s", full);
         }
         n++;
     }
@@ -1686,6 +1729,53 @@ int scan_shortcuts(shortcut_entry **out, int *count)
     *out = arr;
     *count = n;
     return 0;
+}
+
+bool resolve_shortcut_target_path(const char *shortcut_folder_path,
+                                  const char *shortcut_name,
+                                  char *out, int out_size)
+{
+    char m3u_file[SC_MAX_PATH * 2];
+    char joined[SC_MAX_PATH * 2];
+    char *data = NULL;
+    bool ok = false;
+
+    if (!out || out_size <= 0) return false;
+    out[0] = '\0';
+
+    if (!shortcut_folder_path || !shortcut_name)
+        return false;
+
+    if (!join_path_with_suffix(m3u_file, sizeof(m3u_file),
+                               shortcut_folder_path, shortcut_name, ".m3u"))
+        return false;
+
+    data = read_text_file(m3u_file);
+    if (!data) return false;
+
+    {
+        int len = (int)strlen(data);
+        while (len > 0 && (data[len - 1] == '\n' || data[len - 1] == '\r' ||
+                           data[len - 1] == ' ' || data[len - 1] == '\t'))
+            data[--len] = '\0';
+    }
+
+    if (data[0] == '\0')
+        goto cleanup;
+
+    if (data[0] == '/') {
+        ok = normalize_path(data, out, out_size);
+        goto cleanup;
+    }
+
+    if (!join_path(joined, sizeof(joined), shortcut_folder_path, data))
+        goto cleanup;
+
+    ok = normalize_path(joined, out, out_size);
+
+cleanup:
+    free(data);
+    return ok;
 }
 
 bool build_rom_target_path(const rom_file *rom, char *out, int out_size)
@@ -1949,6 +2039,9 @@ int create_rom_shortcut(const char *display_name, const char *tag,
             ap_log("create_rom_shortcut: failed to sync root thumbnail");
     }
 
+    if (resume_sync_for_shortcut_path(folder_path) != 0)
+        ap_log("create_rom_shortcut: resume sync failed for %s", folder_path);
+
     ap_log("create_rom_shortcut: created folder=%s", folder_path);
     return 0;
 }
@@ -2017,6 +2110,10 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
 int remove_shortcut(const char *shortcut_path)
 {
     ap_log("remove_shortcut: path=%s", shortcut_path);
+
+    if (resume_remove_alias_for_shortcut_path(shortcut_path) != 0)
+        ap_log("remove_shortcut: resume alias cleanup failed for %s",
+               shortcut_path);
 
     struct stat st;
     if (lstat(shortcut_path, &st) != 0)
@@ -2118,6 +2215,13 @@ int rename_shortcut(const shortcut_entry *sc, const char *new_display)
 
     if (rename_shortcut_thumbnail(sc->name, new_folder_name) != 0)
         ap_log("rename_shortcut: thumbnail rename failed");
+
+    if (resume_remove_alias_for_shortcut_path(sc->path) != 0)
+        ap_log("rename_shortcut: old resume alias cleanup failed for %s",
+               sc->path);
+    if (resume_sync_for_shortcut_path(new_folder_path) != 0)
+        ap_log("rename_shortcut: new resume alias sync failed for %s",
+               new_folder_path);
 
     ap_log("rename_shortcut: done -> %s", new_folder_path);
     return 0;

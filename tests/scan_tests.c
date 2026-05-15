@@ -167,7 +167,9 @@ static bool setup_test_env(test_env *env)
     if (chdir(env->temp_root) != 0)
         return false;
 
-    return make_dir_recursive("mock_sdcard/Roms");
+    return make_dir_recursive("mock_sdcard/Roms") &&
+           make_dir_recursive("mock_sdcard/.userdata/shared") &&
+           make_dir_recursive("mock_sdcard/.userdata/tg5040/logs");
 }
 
 static void teardown_test_env(test_env *env)
@@ -232,6 +234,135 @@ static const tool_pak *find_tool_by_name(const tool_pak *tools,
     return NULL;
 }
 
+static bool build_absolute_path(const test_env *env, const char *relative_path,
+                                char *out, size_t out_size)
+{
+    return snprintf(out, out_size, "%s/%s", env->temp_root, relative_path) <
+           (int)out_size;
+}
+
+static bool build_resume_manifest_path(char *out, size_t out_size)
+{
+    return snprintf(out, out_size,
+                    "mock_sdcard/.userdata/shared/Shortcuts/resume_aliases.tsv") <
+           (int)out_size;
+}
+
+static bool build_resume_hook_path(char *out, size_t out_size)
+{
+    return snprintf(out, out_size,
+                    "mock_sdcard/.userdata/tg5040/.hooks/post-launch.d/shortcuts-resume.sh") <
+           (int)out_size;
+}
+
+static bool build_alias_slot_path(const char *shortcut_name, const char *tag,
+                                  char *out, size_t out_size)
+{
+    return snprintf(out, out_size,
+                    "mock_sdcard/.userdata/shared/.minui/%s/%s.m3u.txt",
+                    tag, shortcut_name) < (int)out_size;
+}
+
+static bool build_real_slot_path(const char *tag, const char *slot_name,
+                                 char *out, size_t out_size)
+{
+    return snprintf(out, out_size,
+                    "mock_sdcard/.userdata/shared/.minui/%s/%s.txt",
+                    tag, slot_name) < (int)out_size;
+}
+
+static bool manifest_contains_entry(const char *shortcut_path,
+                                    const char *alias_path)
+{
+    char manifest_path[SC_MAX_PATH];
+    char rel_rel_line[SC_MAX_PATH * 2];
+    char rel_abs_line[SC_MAX_PATH * 2];
+    char abs_rel_line[SC_MAX_PATH * 2];
+    char abs_abs_line[SC_MAX_PATH * 2];
+    char abs_shortcut_path[SC_MAX_PATH];
+    char abs_alias_path[SC_MAX_PATH];
+    char *data;
+    bool ok = false;
+    bool have_abs_shortcut = false;
+    bool have_abs_alias = false;
+
+    if (!build_resume_manifest_path(manifest_path, sizeof(manifest_path)))
+        return false;
+    if (!path_exists(manifest_path))
+        return false;
+    if (snprintf(rel_rel_line, sizeof(rel_rel_line), "%s\t%s\n",
+                 shortcut_path, alias_path) >= (int)sizeof(rel_rel_line))
+        return false;
+
+    if (shortcut_path[0] == '/') {
+        snprintf(abs_shortcut_path, sizeof(abs_shortcut_path), "%s",
+                 shortcut_path);
+        have_abs_shortcut = true;
+    } else if (getcwd(abs_shortcut_path, sizeof(abs_shortcut_path)) != NULL) {
+        size_t len = strlen(abs_shortcut_path);
+        if (snprintf(abs_shortcut_path + len,
+                     sizeof(abs_shortcut_path) - len,
+                     "/%s", shortcut_path) <
+            (int)(sizeof(abs_shortcut_path) - len))
+            have_abs_shortcut = true;
+    }
+
+    if (alias_path[0] == '/') {
+        snprintf(abs_alias_path, sizeof(abs_alias_path), "%s", alias_path);
+        have_abs_alias = true;
+    } else if (getcwd(abs_alias_path, sizeof(abs_alias_path)) != NULL) {
+        size_t len = strlen(abs_alias_path);
+        if (snprintf(abs_alias_path + len,
+                     sizeof(abs_alias_path) - len,
+                     "/%s", alias_path) <
+            (int)(sizeof(abs_alias_path) - len))
+            have_abs_alias = true;
+    }
+
+    rel_abs_line[0] = '\0';
+    abs_rel_line[0] = '\0';
+    abs_abs_line[0] = '\0';
+    if (have_abs_alias &&
+        snprintf(rel_abs_line, sizeof(rel_abs_line), "%s\t%s\n",
+                 shortcut_path, abs_alias_path) >= (int)sizeof(rel_abs_line))
+        return false;
+    if (have_abs_shortcut &&
+        snprintf(abs_rel_line, sizeof(abs_rel_line), "%s\t%s\n",
+                 abs_shortcut_path, alias_path) >= (int)sizeof(abs_rel_line))
+        return false;
+    if (have_abs_shortcut && have_abs_alias &&
+        snprintf(abs_abs_line, sizeof(abs_abs_line), "%s\t%s\n",
+                 abs_shortcut_path, abs_alias_path) >= (int)sizeof(abs_abs_line))
+        return false;
+
+    data = read_text_file(manifest_path);
+    if (!data) return false;
+    ok = strstr(data, rel_rel_line) != NULL ||
+         (rel_abs_line[0] != '\0' && strstr(data, rel_abs_line) != NULL) ||
+         (abs_rel_line[0] != '\0' && strstr(data, abs_rel_line) != NULL) ||
+         (abs_abs_line[0] != '\0' && strstr(data, abs_abs_line) != NULL);
+    free(data);
+    return ok;
+}
+
+static void clear_hook_env(void)
+{
+    unsetenv("HOOK_PHASE");
+    unsetenv("HOOK_TYPE");
+    unsetenv("HOOK_LAST");
+}
+
+static bool set_hook_env(const char *type, const char *last_path)
+{
+    if (setenv("HOOK_PHASE", "post", 1) != 0)
+        return false;
+    if (setenv("HOOK_TYPE", type ? type : "", 1) != 0)
+        return false;
+    if (setenv("HOOK_LAST", last_path ? last_path : "", 1) != 0)
+        return false;
+    return true;
+}
+
 static bool create_rom_shortcut_fixture(const char *display_name,
                                         const char *tag,
                                         sc_position pos,
@@ -270,6 +401,46 @@ static bool create_rom_shortcut_fixture(const char *display_name,
         snprintf(out_folder_name, out_folder_name_size, "%s", folder_name);
     if (out_folder_path && out_folder_path_size > 0)
         snprintf(out_folder_path, out_folder_path_size, "%s", folder_path);
+    return true;
+}
+
+static bool create_tool_shortcut_fixture(const char *display_name,
+                                         sc_position pos,
+                                         char *out_folder_path,
+                                         size_t folder_path_size)
+{
+    char folder_name[SC_MAX_NAME];
+    char folder_path[SC_MAX_PATH];
+    char m3u_path[SC_MAX_PATH];
+    char marker_path[SC_MAX_PATH];
+    char target_path[SC_MAX_PATH];
+
+    if (!build_folder_name(pos, display_name, BRIDGE_EMU_TAG,
+                           folder_name, sizeof(folder_name)))
+        return false;
+    if (snprintf(folder_path, sizeof(folder_path), "mock_sdcard/Roms/%s",
+                 folder_name) >= (int)sizeof(folder_path))
+        return false;
+    if (!make_dir_recursive(folder_path))
+        return false;
+    if (snprintf(m3u_path, sizeof(m3u_path), "%s/%s.m3u",
+                 folder_path, folder_name) >= (int)sizeof(m3u_path))
+        return false;
+    if (snprintf(marker_path, sizeof(marker_path), "%s/.shortcut",
+                 folder_path) >= (int)sizeof(marker_path))
+        return false;
+    if (snprintf(target_path, sizeof(target_path), "%s/target",
+                 folder_path) >= (int)sizeof(target_path))
+        return false;
+    if (!write_file(m3u_path, "target"))
+        return false;
+    if (!write_file(marker_path, display_name))
+        return false;
+    if (!write_file(target_path, "/mnt/SDCARD/Tools/tg5040/Foo.pak"))
+        return false;
+
+    if (out_folder_path && folder_path_size > 0)
+        snprintf(out_folder_path, folder_path_size, "%s", folder_path);
     return true;
 }
 
@@ -1212,6 +1383,522 @@ cleanup:
     return ok;
 }
 
+static bool test_resume_hook_install_is_idempotent(void)
+{
+    static const char expected_script[] =
+        "#!/bin/sh\n"
+        "\n"
+        "if [ \"${HOOK_PHASE:-}\" != \"post\" ] || [ \"${HOOK_TYPE:-}\" != \"rom\" ]; then\n"
+        "    exit 0\n"
+        "fi\n"
+        "\n"
+        "HELPER=\"${SDCARD_PATH:-/mnt/SDCARD}/Tools/${PLATFORM:-tg5040}/Shortcuts.pak/shortcuts\"\n"
+        "[ -x \"$HELPER\" ] || exit 0\n"
+        "\n"
+        "LD_LIBRARY_PATH=\"${LD_LIBRARY_PATH:-${SDCARD_PATH:-/mnt/SDCARD}/.system/${PLATFORM:-tg5040}/lib:/usr/miyoo/lib:/usr/miyoo/lib:}\"\n"
+        "export LD_LIBRARY_PATH\n"
+        "\n"
+        "LOG_DIR=\"${LOGS_PATH:-${USERDATA_PATH:-${SDCARD_PATH:-/mnt/SDCARD}/.userdata/${PLATFORM:-tg5040}}/logs}\"\n"
+        "mkdir -p \"$LOG_DIR\"\n"
+        "cd \"${SDCARD_PATH:-/mnt/SDCARD}/Tools/${PLATFORM:-tg5040}/Shortcuts.pak\" || exit 0\n"
+        "\"./shortcuts\" --resume-sync-hook >>\"$LOG_DIR/shortcuts-resume-sync.txt\" 2>&1\n";
+
+    test_env env = {0};
+    char hook_path[SC_MAX_PATH];
+    struct stat st;
+    bool ok = false;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(build_resume_hook_path(hook_path, sizeof(hook_path)),
+          "hook path too long");
+
+    CHECK(ensure_resume_hook_installed() == 0,
+          "first hook install failed");
+    CHECK(path_exists(hook_path), "hook script missing after first install");
+    CHECK(file_contents_equal(hook_path, expected_script),
+          "hook script content mismatch after first install");
+    CHECK(stat(hook_path, &st) == 0, "stat failed for hook script");
+    CHECK((st.st_mode & S_IXUSR) != 0, "hook script is not executable");
+
+    CHECK(ensure_resume_hook_installed() == 0,
+          "second hook install failed");
+    CHECK(file_contents_equal(hook_path, expected_script),
+          "hook script content mismatch after second install");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_resume_sync_hook_noops_for_pak_launches(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char manifest_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(build_resume_manifest_path(manifest_path, sizeof(manifest_path)),
+          "manifest path too long");
+    CHECK(set_hook_env("pak", "mock_sdcard/Roms/Foo (BAR)"),
+          "set hook env failed");
+
+    CHECK(resume_sync_from_hook_env() == 0,
+          "hook sync for pak launch failed");
+    CHECK(!path_exists(manifest_path),
+          "manifest should not exist after pak launch");
+
+    ok = true;
+
+cleanup:
+    clear_hook_env();
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_resume_sync_hook_noops_for_direct_roms_and_non_shortcuts(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char direct_rom_abs[SC_MAX_PATH];
+    char plain_folder_abs[SC_MAX_PATH];
+    char manifest_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(make_dir_recursive("mock_sdcard/Roms/Game Boy Advance (GBA)"),
+          "mkdir rom console failed");
+    CHECK(touch_file("mock_sdcard/Roms/Game Boy Advance (GBA)/Metroid Fusion.gba"),
+          "create direct rom failed");
+    CHECK(make_dir_recursive("mock_sdcard/Roms/Collections"),
+          "mkdir plain folder failed");
+    CHECK(build_absolute_path(&env,
+                              "mock_sdcard/Roms/Game Boy Advance (GBA)/Metroid Fusion.gba",
+                              direct_rom_abs, sizeof(direct_rom_abs)),
+          "direct rom abs path too long");
+    CHECK(build_absolute_path(&env, "mock_sdcard/Roms/Collections",
+                              plain_folder_abs, sizeof(plain_folder_abs)),
+          "plain folder abs path too long");
+    CHECK(build_resume_manifest_path(manifest_path, sizeof(manifest_path)),
+          "manifest path too long");
+
+    CHECK(set_hook_env("rom", direct_rom_abs), "set direct-rom hook env failed");
+    CHECK(resume_sync_from_hook_env() == 0,
+          "hook sync for direct rom failed");
+    CHECK(!path_exists(manifest_path),
+          "manifest should not exist after direct rom hook");
+
+    CHECK(set_hook_env("rom", plain_folder_abs),
+          "set plain-folder hook env failed");
+    CHECK(resume_sync_from_hook_env() == 0,
+          "hook sync for non-shortcut folder failed");
+    CHECK(!path_exists(manifest_path),
+          "manifest should not exist after non-shortcut folder hook");
+
+    ok = true;
+
+cleanup:
+    clear_hook_env();
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_single_file_resume_sync_creates_alias(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char shortcut_name[SC_MAX_NAME];
+    char shortcut_path[SC_MAX_PATH];
+    char real_slot_path[SC_MAX_PATH];
+    char alias_slot_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Fusion", "GBA", SC_POS_ALPHA,
+                                      "../Game Boy Advance (GBA)/Metroid Fusion.gba",
+                                      shortcut_name, sizeof(shortcut_name),
+                                      shortcut_path, sizeof(shortcut_path)),
+          "create shortcut fixture failed");
+    CHECK(build_real_slot_path("GBA", "Metroid Fusion.gba",
+                               real_slot_path, sizeof(real_slot_path)),
+          "real slot path too long");
+    CHECK(build_alias_slot_path(shortcut_name, "GBA",
+                                alias_slot_path, sizeof(alias_slot_path)),
+          "alias slot path too long");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GBA"),
+          "mkdir gba slot dir failed");
+    CHECK(write_file(real_slot_path, "3"), "write real slot failed");
+
+    CHECK(resume_sync_for_shortcut_path(shortcut_path) == 0,
+          "resume sync failed");
+    CHECK(file_contents_equal(alias_slot_path, "3"),
+          "alias slot content mismatch");
+    CHECK(manifest_contains_entry(shortcut_path, alias_slot_path),
+          "manifest missing single-file alias entry");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_cue_folder_resume_sync_creates_alias(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char shortcut_name[SC_MAX_NAME];
+    char shortcut_path[SC_MAX_PATH];
+    char real_slot_path[SC_MAX_PATH];
+    char alias_slot_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Formula 1 97", "PS", SC_POS_ALPHA,
+                                      "../PlayStation (PS)/Formula 1 97/Formula 1 97.cue",
+                                      shortcut_name, sizeof(shortcut_name),
+                                      shortcut_path, sizeof(shortcut_path)),
+          "create cue shortcut fixture failed");
+    CHECK(build_real_slot_path("PS", "Formula 1 97.cue",
+                               real_slot_path, sizeof(real_slot_path)),
+          "real cue slot path too long");
+    CHECK(build_alias_slot_path(shortcut_name, "PS",
+                                alias_slot_path, sizeof(alias_slot_path)),
+          "cue alias slot path too long");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/PS"),
+          "mkdir ps slot dir failed");
+    CHECK(write_file(real_slot_path, "5"), "write cue real slot failed");
+
+    CHECK(resume_sync_for_shortcut_path(shortcut_path) == 0,
+          "cue resume sync failed");
+    CHECK(file_contents_equal(alias_slot_path, "5"),
+          "cue alias slot content mismatch");
+    CHECK(manifest_contains_entry(shortcut_path, alias_slot_path),
+          "manifest missing cue alias entry");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_multidisc_resume_sync_uses_external_m3u_key(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char shortcut_name[SC_MAX_NAME];
+    char shortcut_path[SC_MAX_PATH];
+    char real_slot_path[SC_MAX_PATH];
+    char alias_slot_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Final Fantasy VII", "PS", SC_POS_BOTTOM,
+                                      "../PlayStation (PS)/Final Fantasy VII/Final Fantasy VII.m3u",
+                                      shortcut_name, sizeof(shortcut_name),
+                                      shortcut_path, sizeof(shortcut_path)),
+          "create multidisc shortcut fixture failed");
+    CHECK(build_real_slot_path("PS", "Final Fantasy VII.m3u",
+                               real_slot_path, sizeof(real_slot_path)),
+          "real multidisc slot path too long");
+    CHECK(build_alias_slot_path(shortcut_name, "PS",
+                                alias_slot_path, sizeof(alias_slot_path)),
+          "multidisc alias slot path too long");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/PS"),
+          "mkdir ps slot dir failed");
+    CHECK(write_file(real_slot_path, "2"), "write multidisc real slot failed");
+
+    CHECK(resume_sync_for_shortcut_path(shortcut_path) == 0,
+          "multidisc resume sync failed");
+    CHECK(file_contents_equal(alias_slot_path, "2"),
+          "multidisc alias slot content mismatch");
+    CHECK(manifest_contains_entry(shortcut_path, alias_slot_path),
+          "manifest missing multidisc alias entry");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_missing_real_slot_removes_alias(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char shortcut_name[SC_MAX_NAME];
+    char shortcut_path[SC_MAX_PATH];
+    char real_slot_path[SC_MAX_PATH];
+    char alias_slot_path[SC_MAX_PATH];
+    char manifest_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Fusion", "GBA", SC_POS_ALPHA,
+                                      "../Game Boy Advance (GBA)/Metroid Fusion.gba",
+                                      shortcut_name, sizeof(shortcut_name),
+                                      shortcut_path, sizeof(shortcut_path)),
+          "create shortcut fixture failed");
+    CHECK(build_real_slot_path("GBA", "Metroid Fusion.gba",
+                               real_slot_path, sizeof(real_slot_path)),
+          "real slot path too long");
+    CHECK(build_alias_slot_path(shortcut_name, "GBA",
+                                alias_slot_path, sizeof(alias_slot_path)),
+          "alias slot path too long");
+    CHECK(build_resume_manifest_path(manifest_path, sizeof(manifest_path)),
+          "manifest path too long");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GBA"),
+          "mkdir gba slot dir failed");
+    CHECK(write_file(real_slot_path, "4"), "write real slot failed");
+
+    CHECK(resume_sync_for_shortcut_path(shortcut_path) == 0,
+          "initial resume sync failed");
+    CHECK(path_exists(alias_slot_path), "alias should exist after initial sync");
+
+    CHECK(unlink(real_slot_path) == 0, "remove real slot failed");
+    CHECK(resume_sync_for_shortcut_path(shortcut_path) == 0,
+          "resume sync with missing real slot failed");
+    CHECK(!path_exists(alias_slot_path),
+          "alias should be removed when real slot is missing");
+    CHECK(!path_exists(manifest_path),
+          "manifest should be removed when last alias is gone");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_resume_alias_follows_rename_and_future_updates(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char old_shortcut_name[SC_MAX_NAME];
+    char old_shortcut_path[SC_MAX_PATH];
+    char new_shortcut_name[SC_MAX_NAME];
+    char new_shortcut_path[SC_MAX_PATH];
+    char real_slot_path[SC_MAX_PATH];
+    char old_alias_slot_path[SC_MAX_PATH];
+    char new_alias_slot_path[SC_MAX_PATH];
+    shortcut_entry sc = {0};
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Fusion", "GBA", SC_POS_ALPHA,
+                                      "../Game Boy Advance (GBA)/Metroid Fusion.gba",
+                                      old_shortcut_name, sizeof(old_shortcut_name),
+                                      old_shortcut_path, sizeof(old_shortcut_path)),
+          "create shortcut fixture failed");
+    CHECK(build_folder_name(SC_POS_ALPHA, "Fusion Zero Mission", "GBA",
+                            new_shortcut_name, sizeof(new_shortcut_name)),
+          "build new shortcut name failed");
+    CHECK(snprintf(new_shortcut_path, sizeof(new_shortcut_path),
+                   "mock_sdcard/Roms/%s", new_shortcut_name) <
+          (int)sizeof(new_shortcut_path),
+          "new shortcut path too long");
+    CHECK(build_real_slot_path("GBA", "Metroid Fusion.gba",
+                               real_slot_path, sizeof(real_slot_path)),
+          "real slot path too long");
+    CHECK(build_alias_slot_path(old_shortcut_name, "GBA",
+                                old_alias_slot_path, sizeof(old_alias_slot_path)),
+          "old alias slot path too long");
+    CHECK(build_alias_slot_path(new_shortcut_name, "GBA",
+                                new_alias_slot_path, sizeof(new_alias_slot_path)),
+          "new alias slot path too long");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GBA"),
+          "mkdir gba slot dir failed");
+    CHECK(write_file(real_slot_path, "1"), "write initial real slot failed");
+    CHECK(resume_sync_for_shortcut_path(old_shortcut_path) == 0,
+          "initial resume sync failed");
+
+    snprintf(sc.name, sizeof(sc.name), "%s", old_shortcut_name);
+    snprintf(sc.tag, sizeof(sc.tag), "%s", "GBA");
+    snprintf(sc.display, sizeof(sc.display), "%s", "Fusion");
+    snprintf(sc.path, sizeof(sc.path), "%s", old_shortcut_path);
+
+    CHECK(rename_shortcut(&sc, "Fusion Zero Mission") == 0,
+          "rename shortcut failed");
+    CHECK(!path_exists(old_alias_slot_path),
+          "old alias should be removed after rename");
+    CHECK(file_contents_equal(new_alias_slot_path, "1"),
+          "new alias should reflect initial slot after rename");
+    CHECK(manifest_contains_entry(new_shortcut_path, new_alias_slot_path),
+          "manifest missing renamed alias entry");
+
+    CHECK(write_file(real_slot_path, "2"), "write updated real slot failed");
+    CHECK(resume_sync_for_shortcut_path(new_shortcut_path) == 0,
+          "resume sync after rename failed");
+    CHECK(file_contents_equal(new_alias_slot_path, "2"),
+          "renamed alias did not track later slot updates");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_remove_shortcut_cleans_resume_aliases(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char shortcut_name[SC_MAX_NAME];
+    char shortcut_path[SC_MAX_PATH];
+    char real_slot_path[SC_MAX_PATH];
+    char alias_slot_path[SC_MAX_PATH];
+    char manifest_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Fusion", "GBA", SC_POS_ALPHA,
+                                      "../Game Boy Advance (GBA)/Metroid Fusion.gba",
+                                      shortcut_name, sizeof(shortcut_name),
+                                      shortcut_path, sizeof(shortcut_path)),
+          "create shortcut fixture failed");
+    CHECK(build_real_slot_path("GBA", "Metroid Fusion.gba",
+                               real_slot_path, sizeof(real_slot_path)),
+          "real slot path too long");
+    CHECK(build_alias_slot_path(shortcut_name, "GBA",
+                                alias_slot_path, sizeof(alias_slot_path)),
+          "alias slot path too long");
+    CHECK(build_resume_manifest_path(manifest_path, sizeof(manifest_path)),
+          "manifest path too long");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GBA"),
+          "mkdir gba slot dir failed");
+    CHECK(write_file(real_slot_path, "6"), "write real slot failed");
+    CHECK(resume_sync_for_shortcut_path(shortcut_path) == 0,
+          "resume sync failed");
+
+    CHECK(remove_shortcut(shortcut_path) == 0, "remove_shortcut failed");
+    CHECK(!path_exists(shortcut_path), "shortcut folder should be deleted");
+    CHECK(!path_exists(alias_slot_path), "alias slot should be deleted");
+    CHECK(!path_exists(manifest_path), "manifest should be removed");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_external_delete_is_pruned_on_startup(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char shortcut_name[SC_MAX_NAME];
+    char shortcut_path[SC_MAX_PATH];
+    char real_slot_path[SC_MAX_PATH];
+    char alias_slot_path[SC_MAX_PATH];
+    char manifest_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Fusion", "GBA", SC_POS_ALPHA,
+                                      "../Game Boy Advance (GBA)/Metroid Fusion.gba",
+                                      shortcut_name, sizeof(shortcut_name),
+                                      shortcut_path, sizeof(shortcut_path)),
+          "create shortcut fixture failed");
+    CHECK(build_real_slot_path("GBA", "Metroid Fusion.gba",
+                               real_slot_path, sizeof(real_slot_path)),
+          "real slot path too long");
+    CHECK(build_alias_slot_path(shortcut_name, "GBA",
+                                alias_slot_path, sizeof(alias_slot_path)),
+          "alias slot path too long");
+    CHECK(build_resume_manifest_path(manifest_path, sizeof(manifest_path)),
+          "manifest path too long");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GBA"),
+          "mkdir gba slot dir failed");
+    CHECK(write_file(real_slot_path, "7"), "write real slot failed");
+    CHECK(resume_sync_for_shortcut_path(shortcut_path) == 0,
+          "resume sync failed");
+    CHECK(remove_tree(shortcut_path), "external shortcut delete failed");
+
+    CHECK(resume_sync_prune_aliases() == 0, "startup prune failed");
+    CHECK(!path_exists(alias_slot_path), "alias slot should be pruned");
+    CHECK(!path_exists(manifest_path), "manifest should be removed after prune");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_external_delete_is_pruned_on_hook_run(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char shortcut_name[SC_MAX_NAME];
+    char shortcut_path[SC_MAX_PATH];
+    char real_slot_path[SC_MAX_PATH];
+    char alias_slot_path[SC_MAX_PATH];
+    char manifest_path[SC_MAX_PATH];
+    char direct_rom_abs[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Fusion", "GBA", SC_POS_ALPHA,
+                                      "../Game Boy Advance (GBA)/Metroid Fusion.gba",
+                                      shortcut_name, sizeof(shortcut_name),
+                                      shortcut_path, sizeof(shortcut_path)),
+          "create shortcut fixture failed");
+    CHECK(make_dir_recursive("mock_sdcard/Roms/Game Boy Advance (GBA)"),
+          "mkdir rom console failed");
+    CHECK(touch_file("mock_sdcard/Roms/Game Boy Advance (GBA)/Zero Mission.gba"),
+          "create direct rom failed");
+    CHECK(build_absolute_path(&env,
+                              "mock_sdcard/Roms/Game Boy Advance (GBA)/Zero Mission.gba",
+                              direct_rom_abs, sizeof(direct_rom_abs)),
+          "direct rom abs path too long");
+    CHECK(build_real_slot_path("GBA", "Metroid Fusion.gba",
+                               real_slot_path, sizeof(real_slot_path)),
+          "real slot path too long");
+    CHECK(build_alias_slot_path(shortcut_name, "GBA",
+                                alias_slot_path, sizeof(alias_slot_path)),
+          "alias slot path too long");
+    CHECK(build_resume_manifest_path(manifest_path, sizeof(manifest_path)),
+          "manifest path too long");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GBA"),
+          "mkdir gba slot dir failed");
+    CHECK(write_file(real_slot_path, "8"), "write real slot failed");
+    CHECK(resume_sync_for_shortcut_path(shortcut_path) == 0,
+          "resume sync failed");
+    CHECK(remove_tree(shortcut_path), "external shortcut delete failed");
+    CHECK(set_hook_env("rom", direct_rom_abs), "set hook env failed");
+
+    CHECK(resume_sync_from_hook_env() == 0, "hook-driven prune failed");
+    CHECK(!path_exists(alias_slot_path), "alias slot should be pruned by hook");
+    CHECK(!path_exists(manifest_path),
+          "manifest should be removed by hook-driven prune");
+
+    ok = true;
+
+cleanup:
+    clear_hook_env();
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_tool_shortcuts_never_create_resume_aliases(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char tool_shortcut_path[SC_MAX_PATH];
+    char manifest_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_tool_shortcut_fixture("RetroArch", SC_POS_ALPHA,
+                                       tool_shortcut_path, sizeof(tool_shortcut_path)),
+          "create tool shortcut fixture failed");
+    CHECK(build_resume_manifest_path(manifest_path, sizeof(manifest_path)),
+          "manifest path too long");
+
+    CHECK(resume_sync_for_shortcut_path(tool_shortcut_path) == 0,
+          "tool shortcut resume sync should no-op");
+    CHECK(!path_exists(manifest_path),
+          "tool shortcuts should not create manifest entries");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
 static bool test_rename_shortcut_updates_layout_for_all_positions(void)
 {
     typedef struct {
@@ -1448,6 +2135,18 @@ int main(void)
         { "tool names preserve internal pak suffixes", test_tool_names_preserve_internal_pak_suffixes },
         { "symlinked entries are skipped", test_symlinked_entries_are_skipped },
         { "ensure_dir_exists rejects file collisions", test_ensure_dir_exists_rejects_file_collisions },
+        { "resume hook install is idempotent", test_resume_hook_install_is_idempotent },
+        { "resume sync hook noops for pak launches", test_resume_sync_hook_noops_for_pak_launches },
+        { "resume sync hook noops for direct roms and non shortcuts", test_resume_sync_hook_noops_for_direct_roms_and_non_shortcuts },
+        { "single-file resume sync creates alias", test_single_file_resume_sync_creates_alias },
+        { "cue-folder resume sync creates alias", test_cue_folder_resume_sync_creates_alias },
+        { "multidisc resume sync uses external m3u key", test_multidisc_resume_sync_uses_external_m3u_key },
+        { "missing real slot removes alias", test_missing_real_slot_removes_alias },
+        { "resume alias follows rename and future updates", test_resume_alias_follows_rename_and_future_updates },
+        { "remove shortcut cleans resume aliases", test_remove_shortcut_cleans_resume_aliases },
+        { "external delete is pruned on startup", test_external_delete_is_pruned_on_startup },
+        { "external delete is pruned on hook run", test_external_delete_is_pruned_on_hook_run },
+        { "tool shortcuts never create resume aliases", test_tool_shortcuts_never_create_resume_aliases },
         { "rename shortcut updates layout for all positions", test_rename_shortcut_updates_layout_for_all_positions },
         { "renamed shortcut is detected by rom target", test_renamed_shortcut_is_detected_by_rom_target },
         { "rename shortcut with slash uses storage-safe name", test_rename_shortcut_with_slash_uses_storage_safe_name },
