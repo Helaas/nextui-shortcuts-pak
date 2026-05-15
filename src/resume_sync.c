@@ -27,9 +27,10 @@ static const char resume_hook_script[] =
     "if [ \"${HOOK_PHASE:-}\" != \"post\" ]; then\n"
     "    exit 0\n"
     "fi\n"
-    "if [ \"${HOOK_TYPE:-}\" != \"rom\" ] && [ \"${HOOK_TYPE:-}\" != \"tool\" ]; then\n"
-    "    exit 0\n"
-    "fi\n"
+    "case \"${HOOK_TYPE:-}\" in\n"
+    "    rom|pak|tool) ;;\n"
+    "    *) exit 0 ;;\n"
+    "esac\n"
     "\n"
     "HELPER=\"${SDCARD_PATH:-/mnt/SDCARD}/Tools/${PLATFORM:-tg5040}/Shortcuts.pak/shortcuts\"\n"
     "[ -x \"$HELPER\" ] || exit 0\n"
@@ -505,10 +506,11 @@ static int dedup_recent_txt(void)
     if (!data)
         return 0;
 
-    /* Count lines. */
+    /* Count parsed lines, including a final line without trailing newline. */
+    if (data[0] == '\0') { free(data); return 0; }
+    count = 1;
     for (const char *p = data; *p; p++)
-        if (*p == '\n') count++;
-    if (count == 0) { free(data); return 0; }
+        if (*p == '\n' && p[1] != '\0') count++;
 
     lines = calloc((size_t)count, sizeof(*lines));
     keep = calloc((size_t)count, sizeof(*keep));
@@ -651,10 +653,17 @@ int resume_sync_from_hook_env(void)
     const char *type = getenv("HOOK_TYPE");
     const char *last = getenv("HOOK_LAST");
     int rc;
+    bool is_rom;
+    bool is_supported_non_rom;
 
     if (phase && phase[0] && strcmp(phase, "post") != 0)
         return 0;
-    if (!type || (strcmp(type, "rom") != 0 && strcmp(type, "tool") != 0))
+    if (!type)
+        return 0;
+
+    is_rom = strcmp(type, "rom") == 0;
+    is_supported_non_rom = strcmp(type, "pak") == 0 || strcmp(type, "tool") == 0;
+    if (!is_rom && !is_supported_non_rom)
         return 0;
 
     rc = resume_sync_prune_aliases();
@@ -663,7 +672,7 @@ int resume_sync_from_hook_env(void)
 
     (void)dedup_recent_txt();
 
-    if (strcmp(type, "rom") != 0)
+    if (!is_rom)
         return 0;
 
     if (!last || last[0] == '\0')

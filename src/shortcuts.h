@@ -191,6 +191,9 @@ bool shortcut_exists(const char *display_name, const char *tag);
 /* ── device.c — Bridge emu ────────────────────────────────────── */
 
 void ensure_bridge_emu(void);
+#ifdef TESTING
+const char *bridge_launch_script_for_tests(void);
+#endif
 
 /* ── resume_sync.c ────────────────────────────────────────────── */
 

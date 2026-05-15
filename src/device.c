@@ -105,6 +105,39 @@ static bool strip_trailing_suffix(char *str, const char *suffix)
     return true;
 }
 
+static bool build_tool_shortcut_m3u_content(const char *roms_dir,
+                                            const char *pak_path,
+                                            char *out, size_t out_size)
+{
+    const char *roms_suffix = "/Roms";
+    size_t roms_suffix_len = strlen(roms_suffix);
+    size_t roms_dir_len;
+    size_t sd_root_len;
+    const char *rel_from_sd;
+    int n;
+
+    if (!out || out_size == 0) return false;
+    out[0] = '\0';
+    if (!roms_dir || !pak_path) return false;
+
+    roms_dir_len = strlen(roms_dir);
+    if (roms_dir_len <= roms_suffix_len ||
+        strcmp(roms_dir + roms_dir_len - roms_suffix_len, roms_suffix) != 0)
+        return false;
+
+    sd_root_len = roms_dir_len - roms_suffix_len;
+    if (strncmp(pak_path, roms_dir, sd_root_len) != 0 ||
+        pak_path[sd_root_len] != '/')
+        return false;
+
+    rel_from_sd = pak_path + sd_root_len + 1;
+    if (rel_from_sd[0] == '\0')
+        return false;
+
+    n = snprintf(out, out_size, "../../%s", rel_from_sd);
+    return n >= 0 && (size_t)n < out_size;
+}
+
 static bool join_path(char *out, size_t out_size,
                       const char *left, const char *right)
 {
@@ -2062,6 +2095,14 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
     if (!join_path(folder_path, sizeof(folder_path), roms_dir, folder_name))
         return -1;
 
+    char m3u_content[SC_MAX_PATH];
+    if (!build_tool_shortcut_m3u_content(roms_dir, pak_path,
+                                         m3u_content, sizeof(m3u_content))) {
+        ap_log("create_tool_shortcut: unable to build m3u target for %s",
+               pak_path);
+        return -1;
+    }
+
     ap_log("create_tool_shortcut: name=%s pak=%s pos=%d",
            display_name, pak_path, pos);
 
@@ -2081,10 +2122,6 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
     if (!join_path_with_suffix(m3u_path, sizeof(m3u_path),
                                folder_path, folder_name, ".m3u"))
         return -1;
-    size_t sdcard_len = strlen(roms_dir) - 5; /* strip "/Roms" */
-    char m3u_content[SC_MAX_PATH];
-    snprintf(m3u_content, sizeof(m3u_content), "../..%s",
-             pak_path + sdcard_len);
     if (write_text_file(m3u_path, m3u_content) != 0)
         return -1;
 
@@ -2237,10 +2274,25 @@ int rename_shortcut(const shortcut_entry *sc, const char *new_display)
 static const char *bridge_launch_script =
     "#!/bin/sh\n"
     "# SHORTCUT.pak - Bridge emulator for tool shortcuts.\n"
-    "TARGET=$(cat \"$1\")\n"
+    "# Old format: $1 is the target file containing the real tool path.\n"
+    "# New format: $1 is the tool's .pak directory path.\n"
+    "if [ -f \"$1\" ]; then\n"
+    "    TARGET=$(cat \"$1\")\n"
+    "elif [ -d \"$1\" ]; then\n"
+    "    TARGET=\"$1\"\n"
+    "else\n"
+    "    exit 1\n"
+    "fi\n"
     "if [ -x \"$TARGET/launch.sh\" ]; then\n"
     "    exec \"$TARGET/launch.sh\"\n"
     "fi\n";
+
+#ifdef TESTING
+const char *bridge_launch_script_for_tests(void)
+{
+    return bridge_launch_script;
+}
+#endif
 
 void ensure_bridge_emu(void)
 {

@@ -114,6 +114,16 @@ static bool file_contents_equal(const char *path, const char *expected)
     return ok;
 }
 
+static bool write_executable_file(const char *path, const char *content)
+{
+    return write_file(path, content) && chmod(path, 0755) == 0;
+}
+
+static bool run_command_success(const char *cmd)
+{
+    return system(cmd) == 0;
+}
+
 static bool remove_tree(const char *path)
 {
     struct stat st;
@@ -237,7 +247,12 @@ static const tool_pak *find_tool_by_name(const tool_pak *tools,
 static bool build_absolute_path(const test_env *env, const char *relative_path,
                                 char *out, size_t out_size)
 {
-    return snprintf(out, out_size, "%s/%s", env->temp_root, relative_path) <
+    char cwd[SC_MAX_PATH];
+
+    (void)env;
+    if (!getcwd(cwd, sizeof(cwd)))
+        return false;
+    return snprintf(out, out_size, "%s/%s", cwd, relative_path) <
            (int)out_size;
 }
 
@@ -1281,6 +1296,149 @@ cleanup:
     return ok;
 }
 
+static bool test_tool_shortcut_m3u_uses_valid_relative_tool_path(void)
+{
+    test_env env = {0};
+    app_settings settings = { .copy_artwork = false };
+    bool ok = false;
+    char pak_path[SC_MAX_PATH];
+    char m3u_path[SC_MAX_PATH];
+    char target_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(make_dir_recursive("mock_sdcard/Tools/tg5040/Foo.pak"),
+          "mkdir tool pak failed");
+    CHECK(build_absolute_path(&env, "mock_sdcard/Tools/tg5040/Foo.pak",
+                              pak_path, sizeof(pak_path)),
+          "tool pak path too long");
+
+    CHECK(create_tool_shortcut("Foo", pak_path, SC_POS_ALPHA, &settings) == 0,
+          "create_tool_shortcut failed");
+    CHECK(snprintf(m3u_path, sizeof(m3u_path),
+                   "mock_sdcard/Roms/Foo (SHORTCUT)/Foo (SHORTCUT).m3u") <
+          (int)sizeof(m3u_path),
+          "m3u path too long");
+    CHECK(snprintf(target_path, sizeof(target_path),
+                   "mock_sdcard/Roms/Foo (SHORTCUT)/target") <
+          (int)sizeof(target_path),
+          "target path too long");
+    CHECK(file_contents_equal(m3u_path, "../../Tools/tg5040/Foo.pak"),
+          "tool shortcut m3u content mismatch");
+    CHECK(file_contents_equal(target_path, pak_path),
+          "tool shortcut target file mismatch");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_tool_shortcut_rejects_pak_outside_sd_root(void)
+{
+    test_env env = {0};
+    app_settings settings = { .copy_artwork = false };
+    bool ok = false;
+    char pak_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(build_absolute_path(&env, "outside/Foo.pak",
+                              pak_path, sizeof(pak_path)),
+          "outside pak path too long");
+    CHECK(create_tool_shortcut("Foo", pak_path, SC_POS_ALPHA, &settings) != 0,
+          "create_tool_shortcut should reject outside pak path");
+    CHECK(!path_exists("mock_sdcard/Roms/Foo (SHORTCUT)"),
+          "invalid tool shortcut should not create folder");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool bridge_script_accepts_file_and_dir_targets(const char *script_path)
+{
+    char target_dir[SC_MAX_PATH];
+    char launch_path[SC_MAX_PATH];
+    char launch_script[SC_MAX_PATH * 2];
+    char target_file[SC_MAX_PATH];
+    char cmd[SC_MAX_PATH * 4];
+    const char *marker_path = "bridge-marker.txt";
+
+    if (snprintf(target_dir, sizeof(target_dir),
+                 "mock_sdcard/Tools/tg5040/Foo.pak") >= (int)sizeof(target_dir))
+        return false;
+    if (snprintf(launch_path, sizeof(launch_path), "%s/launch.sh",
+                 target_dir) >= (int)sizeof(launch_path))
+        return false;
+    if (!make_dir_recursive(target_dir))
+        return false;
+    if (snprintf(launch_script, sizeof(launch_script),
+                 "#!/bin/sh\nprintf 'ran\\n' >> '%s'\n",
+                 marker_path) >= (int)sizeof(launch_script))
+        return false;
+    if (!write_executable_file(launch_path, launch_script))
+        return false;
+    if (snprintf(target_file, sizeof(target_file), "bridge-target.txt") >=
+        (int)sizeof(target_file))
+        return false;
+    if (!write_file(target_file, target_dir))
+        return false;
+
+    if (snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\"",
+                 script_path, target_file) >= (int)sizeof(cmd))
+        return false;
+    if (!run_command_success(cmd))
+        return false;
+
+    if (snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\"",
+                 script_path, target_dir) >= (int)sizeof(cmd))
+        return false;
+    if (!run_command_success(cmd))
+        return false;
+
+    return file_contents_equal(marker_path, "ran\nran\n");
+}
+
+static bool test_bridge_launcher_accepts_file_and_dir_targets(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char embedded_path[SC_MAX_PATH];
+    char resource_path[SC_MAX_PATH];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(snprintf(embedded_path, sizeof(embedded_path),
+                   "embedded-bridge.sh") < (int)sizeof(embedded_path),
+          "embedded bridge path too long");
+    CHECK(write_executable_file(embedded_path,
+                                bridge_launch_script_for_tests()),
+          "write embedded bridge script failed");
+    CHECK(bridge_script_accepts_file_and_dir_targets("./embedded-bridge.sh"),
+          "embedded bridge script did not accept both target formats");
+
+    CHECK(remove_tree("mock_sdcard"), "reset bridge fixture failed");
+    CHECK(remove_tree("bridge-marker.txt"), "reset bridge marker failed");
+    CHECK(remove_tree("bridge-target.txt"), "reset bridge target failed");
+    CHECK(make_dir_recursive("mock_sdcard/Roms") &&
+          make_dir_recursive("mock_sdcard/.userdata/shared") &&
+          make_dir_recursive("mock_sdcard/.userdata/tg5040/logs"),
+          "recreate test env dirs failed");
+    CHECK(snprintf(resource_path, sizeof(resource_path),
+                   "%s/resources/SHORTCUT.pak/launch.sh",
+                   env.original_cwd) < (int)sizeof(resource_path),
+          "resource bridge path too long");
+    CHECK(bridge_script_accepts_file_and_dir_targets(resource_path),
+          "resource bridge script did not accept both target formats");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
 static bool test_symlinked_entries_are_skipped(void)
 {
     test_env env = {0};
@@ -1391,9 +1549,10 @@ static bool test_resume_hook_install_is_idempotent(void)
         "if [ \"${HOOK_PHASE:-}\" != \"post\" ]; then\n"
         "    exit 0\n"
         "fi\n"
-        "if [ \"${HOOK_TYPE:-}\" != \"rom\" ] && [ \"${HOOK_TYPE:-}\" != \"tool\" ]; then\n"
-        "    exit 0\n"
-        "fi\n"
+        "case \"${HOOK_TYPE:-}\" in\n"
+        "    rom|pak|tool) ;;\n"
+        "    *) exit 0 ;;\n"
+        "esac\n"
         "\n"
         "HELPER=\"${SDCARD_PATH:-/mnt/SDCARD}/Tools/${PLATFORM:-tg5040}/Shortcuts.pak/shortcuts\"\n"
         "[ -x \"$HELPER\" ] || exit 0\n"
@@ -1451,6 +1610,36 @@ static bool test_resume_sync_hook_noops_for_pak_launches(void)
           "hook sync for pak launch failed");
     CHECK(!path_exists(manifest_path),
           "manifest should not exist after pak launch");
+
+    ok = true;
+
+cleanup:
+    clear_hook_env();
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_pak_launch_dedups_recent_without_trailing_newline(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    const char *recent_path = "mock_sdcard/.userdata/shared/.minui/recent.txt";
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui"),
+          "mkdir recent dir failed");
+    CHECK(write_file(recent_path,
+                     "/Roms/GBA (GBA)/Metroid Fusion.gba\tMetroid Fusion\n"
+                     "/Tools/tg5040/Foo.pak\tFoo"),
+          "write recent fixture failed");
+    CHECK(set_hook_env("pak", "/mnt/SDCARD/Tools/tg5040/Foo.pak"),
+          "set pak hook env failed");
+
+    CHECK(resume_sync_from_hook_env() == 0,
+          "pak hook sync failed");
+    CHECK(file_contents_equal(recent_path,
+                              "/Roms/GBA (GBA)/Metroid Fusion.gba\tMetroid Fusion\n"),
+          "recent.txt was not deduped for final line without newline");
 
     ok = true;
 
@@ -2136,10 +2325,14 @@ int main(void)
         { "slash-mapped shortcut creation uses storage-safe names", test_slash_mapped_shortcut_creation_uses_storage_safe_names },
         { "ports .ports dir always hidden", test_ports_dotports_always_hidden },
         { "tool names preserve internal pak suffixes", test_tool_names_preserve_internal_pak_suffixes },
+        { "tool shortcut m3u uses valid relative tool path", test_tool_shortcut_m3u_uses_valid_relative_tool_path },
+        { "tool shortcut rejects pak outside sd root", test_tool_shortcut_rejects_pak_outside_sd_root },
+        { "bridge launcher accepts file and dir targets", test_bridge_launcher_accepts_file_and_dir_targets },
         { "symlinked entries are skipped", test_symlinked_entries_are_skipped },
         { "ensure_dir_exists rejects file collisions", test_ensure_dir_exists_rejects_file_collisions },
         { "resume hook install is idempotent", test_resume_hook_install_is_idempotent },
         { "resume sync hook noops for pak launches", test_resume_sync_hook_noops_for_pak_launches },
+        { "pak launch dedups recent without trailing newline", test_pak_launch_dedups_recent_without_trailing_newline },
         { "resume sync hook noops for direct roms and non shortcuts", test_resume_sync_hook_noops_for_direct_roms_and_non_shortcuts },
         { "single-file resume sync creates alias", test_single_file_resume_sync_creates_alias },
         { "cue-folder resume sync creates alias", test_cue_folder_resume_sync_creates_alias },
