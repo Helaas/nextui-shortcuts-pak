@@ -40,8 +40,8 @@ static void run_app(void)
 
 int main(int argc, char *argv[])
 {
-    (void)argc;
-    (void)argv;
+    if (argc > 1 && strcmp(argv[1], "--resume-sync-hook") == 0)
+        return resume_sync_from_hook_env() == 0 ? 0 : 1;
 
     const char *dev = getenv("DEVICE");
     g_is_brick = (dev && strcasecmp(dev, "brick") == 0);
@@ -63,6 +63,10 @@ int main(int argc, char *argv[])
     ap_log("startup: platform=%s is_brick=%d", AP_PLATFORM_NAME, g_is_brick);
 
     ensure_bridge_emu();
+    if (ensure_resume_hook_installed() != 0)
+        ap_log("startup: failed to install resume hook");
+    if (resume_sync_prune_aliases() != 0)
+        ap_log("startup: failed to prune resume aliases");
     run_app();
 
     ap_quit();
