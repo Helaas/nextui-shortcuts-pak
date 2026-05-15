@@ -432,7 +432,7 @@ static bool create_tool_shortcut_fixture(const char *display_name,
     if (snprintf(target_path, sizeof(target_path), "%s/target",
                  folder_path) >= (int)sizeof(target_path))
         return false;
-    if (!write_file(m3u_path, "target"))
+    if (!write_file(m3u_path, "../../Tools/tg5040/Foo.pak"))
         return false;
     if (!write_file(marker_path, display_name))
         return false;
@@ -1388,7 +1388,10 @@ static bool test_resume_hook_install_is_idempotent(void)
     static const char expected_script[] =
         "#!/bin/sh\n"
         "\n"
-        "if [ \"${HOOK_PHASE:-}\" != \"post\" ] || [ \"${HOOK_TYPE:-}\" != \"rom\" ]; then\n"
+        "if [ \"${HOOK_PHASE:-}\" != \"post\" ]; then\n"
+        "    exit 0\n"
+        "fi\n"
+        "if [ \"${HOOK_TYPE:-}\" != \"rom\" ] && [ \"${HOOK_TYPE:-}\" != \"tool\" ]; then\n"
         "    exit 0\n"
         "fi\n"
         "\n"

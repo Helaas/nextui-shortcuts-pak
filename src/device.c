@@ -2075,12 +2075,17 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
     if (write_text_file(target_path, pak_path) != 0)
         return -1;
 
-    /* Write .m3u pointing to "target". */
+    /* Write .m3u with relative path to the tool's .pak directory,
+     * so NextUI's Game Tracker records the real tool name. */
     char m3u_path[SC_MAX_PATH * 2];
     if (!join_path_with_suffix(m3u_path, sizeof(m3u_path),
                                folder_path, folder_name, ".m3u"))
         return -1;
-    if (write_text_file(m3u_path, "target") != 0)
+    size_t sdcard_len = strlen(roms_dir) - 5; /* strip "/Roms" */
+    char m3u_content[SC_MAX_PATH];
+    snprintf(m3u_content, sizeof(m3u_content), "../..%s",
+             pak_path + sdcard_len);
+    if (write_text_file(m3u_path, m3u_content) != 0)
         return -1;
 
     /* Write .shortcut marker. */
@@ -2254,12 +2259,6 @@ void ensure_bridge_emu(void)
     char launch_path[SC_MAX_PATH * 2];
     if (!join_path(launch_path, sizeof(launch_path), pak_dir, "launch.sh")) {
         ap_log("ensure_bridge_emu: launch path too long");
-        return;
-    }
-
-    struct stat st;
-    if (stat(launch_path, &st) == 0) {
-        ap_log("ensure_bridge_emu: already present at %s", launch_path);
         return;
     }
 

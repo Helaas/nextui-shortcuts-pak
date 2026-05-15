@@ -24,7 +24,10 @@ typedef struct {
 static const char resume_hook_script[] =
     "#!/bin/sh\n"
     "\n"
-    "if [ \"${HOOK_PHASE:-}\" != \"post\" ] || [ \"${HOOK_TYPE:-}\" != \"rom\" ]; then\n"
+    "if [ \"${HOOK_PHASE:-}\" != \"post\" ]; then\n"
+    "    exit 0\n"
+    "fi\n"
+    "if [ \"${HOOK_TYPE:-}\" != \"rom\" ] && [ \"${HOOK_TYPE:-}\" != \"tool\" ]; then\n"
     "    exit 0\n"
     "fi\n"
     "\n"
@@ -483,6 +486,165 @@ int resume_sync_for_shortcut_path(const char *shortcut_path)
     return upsert_manifest_alias(shortcut_path, alias_slot_path);
 }
 
+static int dedup_recent_txt(void)
+{
+    char shared[SC_MAX_PATH];
+    char recent_path[SC_MAX_PATH];
+    char *data;
+    char **lines = NULL;
+    bool *keep = NULL;
+    int count = 0;
+    int rc = 0;
+
+    get_shared_userdata_path(shared, sizeof(shared));
+    if (snprintf(recent_path, sizeof(recent_path), "%s/.minui/recent.txt",
+                 shared) >= (int)sizeof(recent_path))
+        return -1;
+
+    data = read_text_file(recent_path);
+    if (!data)
+        return 0;
+
+    /* Count lines. */
+    for (const char *p = data; *p; p++)
+        if (*p == '\n') count++;
+    if (count == 0) { free(data); return 0; }
+
+    lines = calloc((size_t)count, sizeof(*lines));
+    keep = calloc((size_t)count, sizeof(*keep));
+    if (!lines || !keep) { rc = -1; goto out; }
+
+    /* Parse lines. */
+    char *line;
+    char *saveptr = NULL;
+    int idx = 0;
+    for (line = strtok_r(data, "\n", &saveptr);
+         line != NULL && idx < count;
+         line = strtok_r(NULL, "\n", &saveptr)) {
+        if (line[0] == '\0') { keep[idx] = true; idx++; continue; }
+        lines[idx] = strdup(line);
+        keep[idx] = true;
+        idx++;
+    }
+    count = idx;
+
+    /* Group by base filename and dedup. */
+    for (int i = 0; i < count; i++) {
+        if (!keep[i] || !lines[i]) continue;
+
+        /* Split line into path and display name. */
+        char *tab = strchr(lines[i], '\t');
+        if (!tab) continue;
+        *tab = '\0';
+        const char *path_i = lines[i];
+        const char *name_i = tab + 1;
+
+        /* Extract base filename from path (last component). */
+        const char *base_i = strrchr(path_i, '/');
+        if (!base_i) { *tab = '\t'; continue; }
+        base_i++;
+
+        bool i_is_shortcut = strstr(path_i, "/../") != NULL;
+
+        for (int j = i + 1; j < count; j++) {
+            if (!keep[j] || !lines[j]) continue;
+
+            char *tab2 = strchr(lines[j], '\t');
+            if (!tab2) continue;
+            *tab2 = '\0';
+            const char *path_j = lines[j];
+            const char *name_j = tab2 + 1;
+
+            const char *base_j = strrchr(path_j, '/');
+            if (!base_j) { *tab2 = '\t'; continue; }
+            base_j++;
+
+            /* Same game if base filename matches. */
+            if (strcmp(base_i, base_j) != 0) { *tab2 = '\t'; continue; }
+            *tab2 = '\t';
+
+            bool j_is_shortcut = strstr(path_j, "/../") != NULL;
+
+            /* If names differ or one is a shortcut-resolved path, dedup. */
+            if (strcmp(name_i, name_j) != 0 || i_is_shortcut != j_is_shortcut) {
+                if (i_is_shortcut && !j_is_shortcut)
+                    keep[j] = false;
+                else if (j_is_shortcut && !i_is_shortcut)
+                    keep[i] = false;
+                else
+                    keep[j] = false;
+            }
+        }
+        *tab = '\t';
+    }
+
+    /* Remove non-game entries (tools, bridge shortcuts, etc.). */
+    for (int i = 0; i < count; i++) {
+        if (!keep[i] || !lines[i]) continue;
+        const char *tab = strchr(lines[i], '\t');
+        if (!tab) continue;
+        size_t path_len = (size_t)(tab - lines[i]);
+
+        const char *tools = strstr(lines[i], "/Tools/");
+        if (tools && (size_t)(tools - lines[i]) < path_len) {
+            keep[i] = false;
+            continue;
+        }
+
+        const char *shortcut_tag = strstr(lines[i], "(SHORTCUT)");
+        if (shortcut_tag && (size_t)(shortcut_tag - lines[i]) < path_len) {
+            keep[i] = false;
+            continue;
+        }
+    }
+
+    /* Count kept entries. */
+    int kept = 0;
+    for (int i = 0; i < count; i++)
+        if (keep[i]) kept++;
+
+    if (kept < count) {
+        /* Write back deduplicated recent.txt. */
+        char temp_path[SC_MAX_PATH];
+        if (snprintf(temp_path, sizeof(temp_path), "%s.tmp", recent_path) >=
+            (int)sizeof(temp_path))
+            { rc = -1; goto out; }
+
+        FILE *f = fopen(temp_path, "w");
+        if (!f) { rc = -1; goto out; }
+
+        for (int i = 0; i < count; i++) {
+            if (keep[i] && lines[i]) {
+                if (fputs(lines[i], f) == EOF || fputc('\n', f) == EOF) {
+                    fclose(f);
+                    (void)unlink(temp_path);
+                    rc = -1;
+                    goto out;
+                }
+            }
+        }
+
+        if (fclose(f) != 0) {
+            (void)unlink(temp_path);
+            rc = -1;
+            goto out;
+        }
+
+        if (rename(temp_path, recent_path) != 0) {
+            (void)unlink(temp_path);
+            rc = -1;
+            goto out;
+        }
+    }
+
+out:
+    for (int i = 0; i < count; i++) free(lines[i]);
+    free(lines);
+    free(keep);
+    free(data);
+    return rc;
+}
+
 int resume_sync_from_hook_env(void)
 {
     const char *phase = getenv("HOOK_PHASE");
@@ -492,12 +654,17 @@ int resume_sync_from_hook_env(void)
 
     if (phase && phase[0] && strcmp(phase, "post") != 0)
         return 0;
-    if (!type || strcmp(type, "rom") != 0)
+    if (!type || (strcmp(type, "rom") != 0 && strcmp(type, "tool") != 0))
         return 0;
 
     rc = resume_sync_prune_aliases();
     if (rc != 0)
         return rc;
+
+    (void)dedup_recent_txt();
+
+    if (strcmp(type, "rom") != 0)
+        return 0;
 
     if (!last || last[0] == '\0')
         return 0;
