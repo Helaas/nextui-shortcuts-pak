@@ -2093,6 +2093,59 @@ cleanup:
     return ok;
 }
 
+static bool test_remove_shortcut_skips_tampered_manifest_alias_path(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char shortcut_name[SC_MAX_NAME];
+    char shortcut_path[SC_MAX_PATH];
+    char real_slot_path[SC_MAX_PATH];
+    char alias_slot_path[SC_MAX_PATH];
+    char manifest_path[SC_MAX_PATH];
+    char manifest_content[SC_MAX_PATH * 2];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Fusion", "GBA", SC_POS_ALPHA,
+                                      "../Game Boy Advance (GBA)/Metroid Fusion.gba",
+                                      shortcut_name, sizeof(shortcut_name),
+                                      shortcut_path, sizeof(shortcut_path)),
+          "create shortcut fixture failed");
+    CHECK(build_real_slot_path("GBA", "Metroid Fusion.gba",
+                               real_slot_path, sizeof(real_slot_path)),
+          "real slot path too long");
+    CHECK(build_alias_slot_path(shortcut_name, "GBA",
+                                alias_slot_path, sizeof(alias_slot_path)),
+          "alias slot path too long");
+    CHECK(build_resume_manifest_path(manifest_path, sizeof(manifest_path)),
+          "manifest path too long");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GBA"),
+          "mkdir gba slot dir failed");
+    CHECK(write_file(real_slot_path, "6"), "write real slot failed");
+    CHECK(resume_sync_for_shortcut_path(shortcut_path) == 0,
+          "resume sync failed");
+    CHECK(make_dir_recursive("outside"), "mkdir outside failed");
+    CHECK(write_file("outside/keep.txt", "keep"), "write outside marker failed");
+    CHECK(snprintf(manifest_content, sizeof(manifest_content),
+                   "%s\toutside/keep.txt\n", shortcut_path) <
+          (int)sizeof(manifest_content),
+          "manifest content too long");
+    CHECK(write_file(manifest_path, manifest_content),
+          "write tampered manifest failed");
+
+    CHECK(remove_shortcut(shortcut_path) == 0, "remove_shortcut failed");
+    CHECK(path_exists("outside/keep.txt"),
+          "tampered manifest alias path should not be deleted");
+    CHECK(!path_exists(shortcut_path), "shortcut folder should be deleted");
+    CHECK(!path_exists(alias_slot_path), "expected alias slot should be deleted");
+    CHECK(!path_exists(manifest_path), "manifest should be removed");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
 static bool test_external_delete_is_pruned_on_startup(void)
 {
     test_env env = {0};
@@ -2127,6 +2180,61 @@ static bool test_external_delete_is_pruned_on_startup(void)
     CHECK(resume_sync_prune_aliases() == 0, "startup prune failed");
     CHECK(!path_exists(alias_slot_path), "alias slot should be pruned");
     CHECK(!path_exists(manifest_path), "manifest should be removed after prune");
+
+    ok = true;
+
+cleanup:
+    teardown_test_env(&env);
+    return ok;
+}
+
+static bool test_prune_skips_tampered_manifest_alias_path(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    char shortcut_name[SC_MAX_NAME];
+    char shortcut_path[SC_MAX_PATH];
+    char real_slot_path[SC_MAX_PATH];
+    char alias_slot_path[SC_MAX_PATH];
+    char manifest_path[SC_MAX_PATH];
+    char manifest_content[SC_MAX_PATH * 2];
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(create_rom_shortcut_fixture("Fusion", "GBA", SC_POS_ALPHA,
+                                      "../Game Boy Advance (GBA)/Metroid Fusion.gba",
+                                      shortcut_name, sizeof(shortcut_name),
+                                      shortcut_path, sizeof(shortcut_path)),
+          "create shortcut fixture failed");
+    CHECK(build_real_slot_path("GBA", "Metroid Fusion.gba",
+                               real_slot_path, sizeof(real_slot_path)),
+          "real slot path too long");
+    CHECK(build_alias_slot_path(shortcut_name, "GBA",
+                                alias_slot_path, sizeof(alias_slot_path)),
+          "alias slot path too long");
+    CHECK(build_resume_manifest_path(manifest_path, sizeof(manifest_path)),
+          "manifest path too long");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared/.minui/GBA"),
+          "mkdir gba slot dir failed");
+    CHECK(write_file(real_slot_path, "7"), "write real slot failed");
+    CHECK(resume_sync_for_shortcut_path(shortcut_path) == 0,
+          "resume sync failed");
+    CHECK(make_dir_recursive("outside"), "mkdir outside failed");
+    CHECK(write_file("outside/keep.txt", "keep"), "write outside marker failed");
+    CHECK(snprintf(manifest_content, sizeof(manifest_content),
+                   "%s\toutside/keep.txt\n", shortcut_path) <
+          (int)sizeof(manifest_content),
+          "manifest content too long");
+    CHECK(write_file(manifest_path, manifest_content),
+          "write tampered manifest failed");
+    CHECK(remove_tree(shortcut_path), "external shortcut delete failed");
+
+    CHECK(resume_sync_prune_aliases() == 0, "startup prune failed");
+    CHECK(path_exists("outside/keep.txt"),
+          "tampered manifest alias path should not be pruned");
+    CHECK(path_exists(alias_slot_path),
+          "unreferenced expected alias slot should be left untouched");
+    CHECK(!path_exists(manifest_path),
+          "tampered manifest row should be removed after prune");
 
     ok = true;
 
@@ -2465,7 +2573,9 @@ int main(void)
         { "missing real slot removes alias", test_missing_real_slot_removes_alias },
         { "resume alias follows rename and future updates", test_resume_alias_follows_rename_and_future_updates },
         { "remove shortcut cleans resume aliases", test_remove_shortcut_cleans_resume_aliases },
+        { "remove shortcut skips tampered manifest alias path", test_remove_shortcut_skips_tampered_manifest_alias_path },
         { "external delete is pruned on startup", test_external_delete_is_pruned_on_startup },
+        { "prune skips tampered manifest alias path", test_prune_skips_tampered_manifest_alias_path },
         { "external delete is pruned on hook run", test_external_delete_is_pruned_on_hook_run },
         { "tool shortcuts never create resume aliases", test_tool_shortcuts_never_create_resume_aliases },
         { "rename shortcut updates layout for all positions", test_rename_shortcut_updates_layout_for_all_positions },

@@ -106,6 +106,25 @@ static bool remove_file_if_exists_local(const char *path)
     return errno == ENOENT;
 }
 
+static bool path_has_parent_segment_local(const char *path)
+{
+    const char *segment = path;
+
+    if (!path) return true;
+
+    while (*segment) {
+        const char *next = strchr(segment, '/');
+        size_t len = next ? (size_t)(next - segment) : strlen(segment);
+
+        if (len == 2 && segment[0] == '.' && segment[1] == '.')
+            return true;
+        if (!next) break;
+        segment = next + 1;
+    }
+
+    return false;
+}
+
 static bool write_executable_file_local(const char *path, const char *content)
 {
     FILE *f;
@@ -194,6 +213,51 @@ static bool build_real_slot_path(const char *target_path, const char *tag,
     get_shared_userdata_path(shared, sizeof(shared));
     return snprintf(out, out_size, "%s/.minui/%s/%s.txt",
                     shared, tag, base) < (int)out_size;
+}
+
+static bool alias_slot_path_is_expected(const char *shortcut_path,
+                                        const char *alias_slot_path)
+{
+    char shortcut_name[SC_MAX_NAME];
+    char tag[SC_MAX_TAG];
+    char expected[SC_MAX_PATH];
+    char shared[SC_MAX_PATH];
+    char minui_prefix[SC_MAX_PATH];
+
+    if (!alias_slot_path || alias_slot_path[0] == '\0')
+        return false;
+    if (path_has_parent_segment_local(alias_slot_path))
+        return false;
+    if (!ends_with(alias_slot_path, ".m3u.txt"))
+        return false;
+    if (!parse_shortcut_name_tag_from_path(shortcut_path,
+                                           shortcut_name, sizeof(shortcut_name),
+                                           tag, sizeof(tag)))
+        return false;
+    if (strcmp(tag, BRIDGE_EMU_TAG) == 0)
+        return false;
+    if (!build_alias_slot_path(shortcut_name, tag,
+                               expected, sizeof(expected)))
+        return false;
+    if (strcmp(alias_slot_path, expected) != 0)
+        return false;
+
+    get_shared_userdata_path(shared, sizeof(shared));
+    if (snprintf(minui_prefix, sizeof(minui_prefix), "%s/.minui/",
+                 shared) >= (int)sizeof(minui_prefix))
+        return false;
+
+    return starts_with(alias_slot_path, minui_prefix);
+}
+
+static void remove_manifest_alias_if_expected(const manifest_entry *entry)
+{
+    if (!entry) return;
+    if (!alias_slot_path_is_expected(entry->shortcut_path,
+                                     entry->alias_slot_path))
+        return;
+
+    (void)remove_file_if_exists_local(entry->alias_slot_path);
 }
 
 static bool copy_slot_alias_file(const char *src_path, const char *dst_path)
@@ -329,7 +393,7 @@ static void remove_manifest_rows_for_shortcut(manifest_entry *entries, int *coun
 
     for (int i = 0; i < *count; i++) {
         if (strcmp(entries[i].shortcut_path, shortcut_path) == 0) {
-            (void)remove_file_if_exists_local(entries[i].alias_slot_path);
+            remove_manifest_alias_if_expected(&entries[i]);
             continue;
         }
         if (write_idx != i)
@@ -442,7 +506,7 @@ int resume_sync_prune_aliases(void)
         if (!is_rom_shortcut_path_local(entries[i].shortcut_path,
                                         shortcut_name, sizeof(shortcut_name),
                                         tag, sizeof(tag))) {
-            (void)remove_file_if_exists_local(entries[i].alias_slot_path);
+            remove_manifest_alias_if_expected(&entries[i]);
             continue;
         }
 
