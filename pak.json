@@ -7,7 +7,7 @@
   "repo_url": "https://github.com/Helaas/nextui-shortcuts-pak",
   "release_filename": "Shortcuts.pakz",
   "changelog": {
-    "v2.1.0": "For NextUI v6.11.0 and higher: X to Resume now works on shortcut folders. Cleaner Game Switcher & Recently Played with no duplicates or tool entries.",
+    "v2.1.0": "NextUI ≥ v6.11.0: X to Resume now works on ROM shortcuts. Cleaner Game Switcher & Recently Played with no duplicates or tool entries.",
     "v2.0.0": "Add Miyoo Flip support and ability to rename shortcuts. Major rework porting app from Gabagool to Apostrophe.",
     "v1.1.1": "ROMs inside subfolders now appear in the ROM picker and can be used to create shortcuts.",
     "v1.1.0": "Adds customizable shortcut artwork backgrounds, the ability to view hidden/disabled ROMs, renamed and streamlined artwork management and settings behavior, improved defaults, and easier setup for curated “five-game handheld” menus.",
