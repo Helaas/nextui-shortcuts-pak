@@ -1359,26 +1359,49 @@ cleanup:
 
 static bool bridge_script_accepts_file_and_dir_targets(const char *script_path)
 {
+    char cwd[SC_MAX_PATH];
     char target_dir[SC_MAX_PATH];
+    char shortcut_arg[SC_MAX_PATH];
     char launch_path[SC_MAX_PATH];
+    char tool_path[SC_MAX_PATH];
     char launch_script[SC_MAX_PATH * 2];
+    char tool_script[SC_MAX_PATH * 2];
     char target_file[SC_MAX_PATH];
+    char marker_path[SC_MAX_PATH];
     char cmd[SC_MAX_PATH * 4];
-    const char *marker_path = "bridge-marker.txt";
 
+    if (!getcwd(cwd, sizeof(cwd)))
+        return false;
+    if (snprintf(marker_path, sizeof(marker_path), "%s/bridge-marker.txt",
+                 cwd) >= (int)sizeof(marker_path))
+        return false;
     if (snprintf(target_dir, sizeof(target_dir),
                  "mock_sdcard/Tools/tg5040/Foo.pak") >= (int)sizeof(target_dir))
+        return false;
+    if (snprintf(shortcut_arg, sizeof(shortcut_arg),
+                 "mock_sdcard/Roms/Foo (SHORTCUT)/../../Tools/tg5040/Foo.pak") >=
+        (int)sizeof(shortcut_arg))
         return false;
     if (snprintf(launch_path, sizeof(launch_path), "%s/launch.sh",
                  target_dir) >= (int)sizeof(launch_path))
         return false;
-    if (!make_dir_recursive(target_dir))
+    if (snprintf(tool_path, sizeof(tool_path), "%s/tool.sh",
+                 target_dir) >= (int)sizeof(tool_path))
+        return false;
+    if (!make_dir_recursive(target_dir) ||
+        !make_dir_recursive("mock_sdcard/Roms/Foo (SHORTCUT)"))
         return false;
     if (snprintf(launch_script, sizeof(launch_script),
+                 "#!/bin/sh\ncd $(dirname \"$0\")\n./tool.sh\n") >=
+        (int)sizeof(launch_script))
+        return false;
+    if (snprintf(tool_script, sizeof(tool_script),
                  "#!/bin/sh\nprintf 'ran\\n' >> '%s'\n",
-                 marker_path) >= (int)sizeof(launch_script))
+                 marker_path) >= (int)sizeof(tool_script))
         return false;
     if (!write_executable_file(launch_path, launch_script))
+        return false;
+    if (!write_executable_file(tool_path, tool_script))
         return false;
     if (snprintf(target_file, sizeof(target_file), "bridge-target.txt") >=
         (int)sizeof(target_file))
@@ -1393,7 +1416,7 @@ static bool bridge_script_accepts_file_and_dir_targets(const char *script_path)
         return false;
 
     if (snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\"",
-                 script_path, target_dir) >= (int)sizeof(cmd))
+                 script_path, shortcut_arg) >= (int)sizeof(cmd))
         return false;
     if (!run_command_success(cmd))
         return false;

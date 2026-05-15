@@ -2283,8 +2283,11 @@ static const char *bridge_launch_script =
     "else\n"
     "    exit 1\n"
     "fi\n"
-    "if [ -x \"$TARGET/launch.sh\" ]; then\n"
-    "    exec \"$TARGET/launch.sh\"\n"
+    "cd \"$TARGET\" || exit 1\n"
+    "TARGET=$(pwd -P)\n"
+    "cd \"$TARGET\" || exit 1\n"
+    "if [ -x ./launch.sh ]; then\n"
+    "    exec ./launch.sh\n"
     "fi\n";
 
 #ifdef TESTING

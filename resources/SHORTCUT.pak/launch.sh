@@ -11,6 +11,9 @@ elif [ -d "$1" ]; then
 else
     exit 1
 fi
-if [ -x "$TARGET/launch.sh" ]; then
-    exec "$TARGET/launch.sh"
+cd "$TARGET" || exit 1
+TARGET=$(pwd -P)
+cd "$TARGET" || exit 1
+if [ -x ./launch.sh ]; then
+    exec ./launch.sh
 fi
