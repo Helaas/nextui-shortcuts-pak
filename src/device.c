@@ -2116,8 +2116,8 @@ int create_tool_shortcut(const char *display_name, const char *pak_path,
     if (write_text_file(target_path, pak_path) != 0)
         return -1;
 
-    /* Write .m3u with relative path to the tool's .pak directory,
-     * so NextUI's Game Tracker records the real tool name. */
+    /* Write .m3u with a relative path to the tool's .pak directory.
+     * NextUI may briefly track this as a ROM; the post-launch hook prunes it. */
     char m3u_path[SC_MAX_PATH * 2];
     if (!join_path_with_suffix(m3u_path, sizeof(m3u_path),
                                folder_path, folder_name, ".m3u"))

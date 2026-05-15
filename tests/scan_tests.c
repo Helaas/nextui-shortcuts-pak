@@ -11,6 +11,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <sqlite3.h>
+
 static bool build_folder_name(sc_position pos, const char *display,
                               const char *tag, char *out, int out_size)
 {
@@ -111,6 +113,50 @@ static bool file_contents_equal(const char *path, const char *expected)
     if (!data) return false;
     ok = strcmp(data, expected) == 0;
     free(data);
+    return ok;
+}
+
+static bool sqlite_exec_sql(const char *db_path, const char *sql)
+{
+    sqlite3 *db = NULL;
+    char *err = NULL;
+    bool ok = false;
+
+    if (sqlite3_open(db_path, &db) != SQLITE_OK)
+        goto out;
+    if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK)
+        goto out;
+
+    ok = true;
+
+out:
+    sqlite3_free(err);
+    if (db) sqlite3_close(db);
+    return ok;
+}
+
+static bool sqlite_query_int(const char *db_path, const char *sql, int *out)
+{
+    sqlite3 *db = NULL;
+    sqlite3_stmt *stmt = NULL;
+    bool ok = false;
+
+    if (!out) return false;
+    *out = 0;
+
+    if (sqlite3_open(db_path, &db) != SQLITE_OK)
+        goto out;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+        goto out;
+    if (sqlite3_step(stmt) != SQLITE_ROW)
+        goto out;
+
+    *out = sqlite3_column_int(stmt, 0);
+    ok = true;
+
+out:
+    if (stmt) sqlite3_finalize(stmt);
+    if (db) sqlite3_close(db);
     return ok;
 }
 
@@ -1672,6 +1718,61 @@ cleanup:
     return ok;
 }
 
+static bool test_pak_launch_prunes_game_tracker_tool_shortcuts(void)
+{
+    test_env env = {0};
+    bool ok = false;
+    const char *db_path = "mock_sdcard/.userdata/shared/game_logs.sqlite";
+    int count = 0;
+
+    CHECK(setup_test_env(&env), "setup failed");
+    CHECK(make_dir_recursive("mock_sdcard/.userdata/shared"),
+          "mkdir shared userdata failed");
+    CHECK(sqlite_exec_sql(db_path,
+          "CREATE TABLE rom("
+          "id INTEGER PRIMARY KEY, type TEXT, name TEXT, file_path TEXT, "
+          "image_path TEXT, created_at INTEGER, updated_at INTEGER);"
+          "CREATE TABLE play_activity("
+          "rom_id INTEGER, play_time INTEGER, created_at INTEGER, "
+          "updated_at INTEGER);"
+          "INSERT INTO rom(id, name, file_path) VALUES"
+          "(1, 'Sonic', 'Sega Genesis (MD)/Sonic.zip'),"
+          "(2, 'Central Scrutinizer', '../Tools/tg5040/Central Scrutinizer.pak'),"
+          "(3, 'Updater', '/mnt/SDCARD/Tools/tg5040/Updater.pak'),"
+          "(4, 'Battery', 'Tools/tg5040/Battery.pak'),"
+          "(5, 'Legacy Tool', 'Legacy (SHORTCUT)/../../Tools/tg5040/Legacy.pak'),"
+          "(6, '0) Portmaster', 'Ports (PORTS)/0) Portmaster.sh');"
+          "INSERT INTO play_activity(rom_id, play_time) VALUES"
+          "(1, 30), (2, 40), (3, 50), (4, 60), (5, 70), (6, 80);"),
+          "create game tracker fixture failed");
+    CHECK(set_hook_env("pak", "/mnt/SDCARD/Tools/tg5040/Updater.pak"),
+          "set pak hook env failed");
+
+    CHECK(resume_sync_from_hook_env() == 0,
+          "pak hook sync failed");
+    CHECK(sqlite_query_int(db_path, "SELECT COUNT(*) FROM rom;", &count),
+          "count rom rows failed");
+    CHECK(count == 2, "expected 2 remaining rom rows, got %d", count);
+    CHECK(sqlite_query_int(db_path, "SELECT COUNT(*) FROM play_activity;", &count),
+          "count play_activity rows failed");
+    CHECK(count == 2, "expected 2 remaining play_activity rows, got %d", count);
+    CHECK(sqlite_query_int(db_path,
+          "SELECT COUNT(*) FROM rom WHERE file_path LIKE '%Tools/%';",
+          &count), "count tool tracker rows failed");
+    CHECK(count == 0, "expected no remaining tool tracker rows, got %d", count);
+    CHECK(sqlite_query_int(db_path,
+          "SELECT COUNT(*) FROM rom WHERE file_path LIKE 'Ports (PORTS)/%';",
+          &count), "count port rows failed");
+    CHECK(count == 1, "expected Port row to remain, got %d", count);
+
+    ok = true;
+
+cleanup:
+    clear_hook_env();
+    teardown_test_env(&env);
+    return ok;
+}
+
 static bool test_resume_sync_hook_noops_for_direct_roms_and_non_shortcuts(void)
 {
     test_env env = {0};
@@ -2356,6 +2457,7 @@ int main(void)
         { "resume hook install is idempotent", test_resume_hook_install_is_idempotent },
         { "resume sync hook noops for pak launches", test_resume_sync_hook_noops_for_pak_launches },
         { "pak launch dedups recent without trailing newline", test_pak_launch_dedups_recent_without_trailing_newline },
+        { "pak launch prunes game tracker tool shortcuts", test_pak_launch_prunes_game_tracker_tool_shortcuts },
         { "resume sync hook noops for direct roms and non shortcuts", test_resume_sync_hook_noops_for_direct_roms_and_non_shortcuts },
         { "single-file resume sync creates alias", test_single_file_resume_sync_creates_alias },
         { "cue-folder resume sync creates alias", test_cue_folder_resume_sync_creates_alias },

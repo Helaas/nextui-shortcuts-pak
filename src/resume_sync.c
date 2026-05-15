@@ -16,6 +16,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <sqlite3.h>
+
 typedef struct {
     char shortcut_path[SC_MAX_PATH];
     char alias_slot_path[SC_MAX_PATH];
@@ -647,6 +649,58 @@ out:
     return rc;
 }
 
+static int prune_game_tracker_tool_shortcuts(void)
+{
+    char shared[SC_MAX_PATH];
+    char db_path[SC_MAX_PATH];
+    sqlite3 *db = NULL;
+    char *err = NULL;
+    struct stat st;
+
+    static const char sql[] =
+        "BEGIN IMMEDIATE;"
+        "DELETE FROM play_activity "
+        "WHERE rom_id IN ("
+        "    SELECT id FROM rom WHERE "
+        "        file_path LIKE '../Tools/%' OR "
+        "        file_path LIKE '../../Tools/%' OR "
+        "        file_path LIKE 'Tools/%' OR "
+        "        file_path LIKE '/mnt/SDCARD/Tools/%' OR "
+        "        file_path LIKE '% (SHORTCUT)/../../Tools/%'"
+        ");"
+        "DELETE FROM rom WHERE "
+        "    file_path LIKE '../Tools/%' OR "
+        "    file_path LIKE '../../Tools/%' OR "
+        "    file_path LIKE 'Tools/%' OR "
+        "    file_path LIKE '/mnt/SDCARD/Tools/%' OR "
+        "    file_path LIKE '% (SHORTCUT)/../../Tools/%';"
+        "COMMIT;";
+
+    get_shared_userdata_path(shared, sizeof(shared));
+    if (snprintf(db_path, sizeof(db_path), "%s/game_logs.sqlite",
+                 shared) >= (int)sizeof(db_path))
+        return -1;
+
+    if (stat(db_path, &st) != 0)
+        return 0;
+
+    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
+        if (db) sqlite3_close(db);
+        return -1;
+    }
+
+    sqlite3_busy_timeout(db, 250);
+    if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
+        sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
+        sqlite3_free(err);
+        sqlite3_close(db);
+        return -1;
+    }
+
+    sqlite3_close(db);
+    return 0;
+}
+
 int resume_sync_from_hook_env(void)
 {
     const char *phase = getenv("HOOK_PHASE");
@@ -671,6 +725,7 @@ int resume_sync_from_hook_env(void)
         return rc;
 
     (void)dedup_recent_txt();
+    (void)prune_game_tracker_tool_shortcuts();
 
     if (!is_rom)
         return 0;

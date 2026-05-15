@@ -15,7 +15,7 @@ CFLAGS := -std=gnu11 -O2 -Wall -Wextra -Wno-unused-parameter \
 	-ffunction-sections -fdata-sections -fstack-protector-strong \
 	$(INCLUDES) $(SDL_CFLAGS)
 
-LDFLAGS := $(SDL_LDFLAGS) -Wl,--gc-sections -lpthread -lm
+LDFLAGS := $(SDL_LDFLAGS) -Wl,--gc-sections -lsqlite3 -lpthread -lm
 
 all: $(BUILD_DIR)/shortcuts
 

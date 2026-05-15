@@ -24,6 +24,7 @@ MY355_TOOLCHAIN  := ghcr.io/loveretro/my355-toolchain:latest
 ADB ?= adb
 
 COMMON_INCLUDES := -I$(APOSTROPHE_DIR)/include -Isrc
+SQLITE_LIBS := -lsqlite3
 
 .PHONY: all native mac run-mac run-native tg5040 tg5050 my355 \
 	test-native package package-tg5040 package-tg5050 package-my355 do-package \
@@ -60,7 +61,7 @@ mac: $(APOSTROPHE_DIR)/include/apostrophe.h
 		-o $(BUILD_DIR)/mac/$(APP_NAME) \
 		$(SRC_FILES) \
 		$(shell pkg-config --libs sdl2 SDL2_ttf SDL2_image) \
-		-lm -lpthread
+		$(SQLITE_LIBS) -lm -lpthread
 
 run-mac: mac
 	./$(BUILD_DIR)/mac/$(APP_NAME)
@@ -79,7 +80,7 @@ $(TEST_BIN): $(TEST_SRC_FILES)
 		$(COMMON_INCLUDES) \
 		-o $(TEST_BIN) \
 		$(TEST_SRC_FILES) \
-		-lm -lpthread
+		$(SQLITE_LIBS) -lm -lpthread
 
 test-native: $(TEST_BIN)
 	./$(TEST_BIN)
