@@ -194,6 +194,12 @@ void ensure_bridge_emu(void);
 #ifdef TESTING
 const char *bridge_launch_script_for_tests(void);
 sc_color hex_to_sc_color_for_tests(const char *hex);
+void compute_art_layout_for_tests(int screen_w, int screen_h,
+                                  int img_w, int img_h,
+                                  double art_width, int fixed_scale,
+                                  int thumb_radius,
+                                  int *out_w, int *out_h,
+                                  int *out_x, int *out_y, int *out_radius);
 #endif
 
 /* ── resume_sync.c ────────────────────────────────────────────── */
@@ -212,6 +218,7 @@ void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
 void shortcut_art_src_path(const shortcut_entry *sc, char *out, int out_size);
 int regenerate_all_media(const app_settings *settings);
 sc_color get_theme_bg_color(void);
+void get_nextui_art_settings(double *art_width, int *thumb_radius);
 int remove_all_media(void);
 
 /* ── ui.c ─────────────────────────────────────────────────────── */

@@ -1185,6 +1185,57 @@ sc_color get_theme_bg_color(void)
 #endif
 }
 
+/* ── NextUI game-art settings ────────────────────────────────── */
+
+/* Read artWidth (percent) and radius from NextUI's minuisettings.txt so
+ * baked-in artwork can match NextUI's own thumbnail layout exactly.
+ * Defaults mirror CFG_DEFAULT_GAMEARTWIDTH / CFG_DEFAULT_THUMBRADIUS. */
+void get_nextui_art_settings(double *art_width, int *thumb_radius)
+{
+    static double cached_art_width = 0.45;
+    static int cached_thumb_radius = 20;
+    static bool loaded = false;
+
+    if (loaded) {
+        if (art_width) *art_width = cached_art_width;
+        if (thumb_radius) *thumb_radius = cached_thumb_radius;
+        return;
+    }
+    loaded = true;
+
+#if !defined(PLATFORM_MAC)
+    char dir[SC_MAX_PATH];
+    char path[SC_MAX_PATH];
+    get_shared_userdata_path(dir, sizeof(dir));
+    if (join_path(path, sizeof(path), dir, "minuisettings.txt")) {
+        char *data = read_text_file(path);
+        if (data) {
+            char *saveptr = NULL;
+            for (char *line = strtok_r(data, "\n", &saveptr);
+                 line;
+                 line = strtok_r(NULL, "\n", &saveptr)) {
+                int v;
+                if (sscanf(line, "artWidth=%i", &v) == 1) {
+                    if (v < 0) v = 0;
+                    if (v > 100) v = 100;
+                    cached_art_width = v / 100.0;
+                } else if (sscanf(line, "radius=%i", &v) == 1) {
+                    if (v < 0) v = 0;
+                    if (v > 24) v = 24;
+                    cached_thumb_radius = v;
+                }
+            }
+            free(data);
+        }
+    }
+    ap_log("get_nextui_art_settings: artWidth=%.2f radius=%d",
+           cached_art_width, cached_thumb_radius);
+#endif
+
+    if (art_width) *art_width = cached_art_width;
+    if (thumb_radius) *thumb_radius = cached_thumb_radius;
+}
+
 /* ── Settings (JSON via cJSON) ────────────────────────────────── */
 
 app_settings load_settings(void)

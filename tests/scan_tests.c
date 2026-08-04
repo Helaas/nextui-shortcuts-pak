@@ -2594,6 +2594,42 @@ cleanup:
     return ok;
 }
 
+static bool test_compute_art_layout_matches_nextui_thumbnail_geometry(void)
+{
+    bool ok = false;
+    int w, h, x, y, radius;
+
+    /* Brick (1024x768, FIXED_SCALE=3), default artWidth=0.45, radius=20.
+     * NextUI: max_w=460, 460x345 fits; x=1024-(460+45)=519; y=384-172=212. */
+    compute_art_layout_for_tests(1024, 768, 460, 345, 0.45, 3, 20,
+                                 &w, &h, &x, &y, &radius);
+    CHECK(w == 460 && h == 345 && x == 519 && y == 212 && radius == 60,
+          "brick layout: w=%d h=%d x=%d y=%d r=%d", w, h, x, y, radius);
+
+    /* tg5040 non-Brick (1280x720, FIXED_SCALE=2): max_w=576, margin=30. */
+    compute_art_layout_for_tests(1280, 720, 460, 345, 0.45, 2, 20,
+                                 &w, &h, &x, &y, &radius);
+    CHECK(w == 576 && h == 432 && x == 674 && y == 144 && radius == 40,
+          "tg5040 layout: w=%d h=%d x=%d y=%d r=%d", w, h, x, y, radius);
+
+    /* Tall art hits the max_h cap (0.6*768=460): 300x600 -> 230x460. */
+    compute_art_layout_for_tests(1024, 768, 300, 600, 0.45, 3, 20,
+                                 &w, &h, &x, &y, &radius);
+    CHECK(w == 230 && h == 460 && x == 749 && y == 154 && radius == 60,
+          "capped layout: w=%d h=%d x=%d y=%d r=%d", w, h, x, y, radius);
+
+    /* Custom user settings: artWidth=40%%, radius=12 (Brick). */
+    compute_art_layout_for_tests(1024, 768, 460, 345, 0.40, 3, 12,
+                                 &w, &h, &x, &y, &radius);
+    CHECK(w == 409 && h == 306 && x == 570 && y == 231 && radius == 36,
+          "custom layout: w=%d h=%d x=%d y=%d r=%d", w, h, x, y, radius);
+
+    ok = true;
+
+cleanup:
+    return ok;
+}
+
 int main(void)
 {
     static const test_case tests[] = {
@@ -2635,6 +2671,7 @@ int main(void)
         { "renamed shortcut is detected by rom target", test_renamed_shortcut_is_detected_by_rom_target },
         { "rename shortcut with slash uses storage-safe name", test_rename_shortcut_with_slash_uses_storage_safe_name },
         { "hex_to_sc_color parses NextUI color formats", test_hex_to_sc_color_parses_nextui_color_formats },
+        { "art layout matches NextUI thumbnail geometry", test_compute_art_layout_matches_nextui_thumbnail_geometry },
     };
     int failures = 0;
 
