@@ -33,6 +33,12 @@ static void apply_rounded_corners(SDL_Surface *surf, int radius)
     int h = surf->h;
     if (radius <= 0 || w == 0 || h == 0) return;
 
+    /* Clamp so overlapping corner circles can't erase the whole surface
+     * (possible with a tiny artWidth setting and large corner radius). */
+    if (radius > w / 2) radius = w / 2;
+    if (radius > h / 2) radius = h / 2;
+    if (radius <= 0) return;
+
     SDL_LockSurface(surf);
     Uint32 *pixels = (Uint32 *)surf->pixels;
     int pitch = surf->pitch / 4; /* pitch in pixels (32-bit) */

@@ -194,6 +194,8 @@ void ensure_bridge_emu(void);
 #ifdef TESTING
 const char *bridge_launch_script_for_tests(void);
 sc_color hex_to_sc_color_for_tests(const char *hex);
+void parse_nextui_art_settings_for_tests(const char *data, double *art_width,
+                                         int *thumb_radius);
 void compute_art_layout_for_tests(int screen_w, int screen_h,
                                   int img_w, int img_h,
                                   double art_width, int fixed_scale,

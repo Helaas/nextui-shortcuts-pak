@@ -1187,9 +1187,44 @@ sc_color get_theme_bg_color(void)
 
 /* ── NextUI game-art settings ────────────────────────────────── */
 
+/* Parse artWidth (percent) and radius from minuisettings.txt content.
+ * Defaults mirror CFG_DEFAULT_GAMEARTWIDTH / CFG_DEFAULT_THUMBRADIUS;
+ * clamps mirror config.c (artWidth 0-100, radius 0-24).
+ * Mutates data (strtok_r). */
+static void parse_nextui_art_settings(char *data, double *art_width,
+                                      int *thumb_radius)
+{
+    if (!data) return;
+
+    char *saveptr = NULL;
+    for (char *line = strtok_r(data, "\n", &saveptr);
+         line;
+         line = strtok_r(NULL, "\n", &saveptr)) {
+        int v;
+        if (sscanf(line, "artWidth=%i", &v) == 1) {
+            if (v < 0) v = 0;
+            if (v > 100) v = 100;
+            if (art_width) *art_width = v / 100.0;
+        } else if (sscanf(line, "radius=%i", &v) == 1) {
+            if (v < 0) v = 0;
+            if (v > 24) v = 24;
+            if (thumb_radius) *thumb_radius = v;
+        }
+    }
+}
+
+#ifdef TESTING
+void parse_nextui_art_settings_for_tests(const char *data, double *art_width,
+                                         int *thumb_radius)
+{
+    char *copy = data ? strdup(data) : NULL;
+    parse_nextui_art_settings(copy, art_width, thumb_radius);
+    free(copy);
+}
+#endif
+
 /* Read artWidth (percent) and radius from NextUI's minuisettings.txt so
- * baked-in artwork can match NextUI's own thumbnail layout exactly.
- * Defaults mirror CFG_DEFAULT_GAMEARTWIDTH / CFG_DEFAULT_THUMBRADIUS. */
+ * baked-in artwork can match NextUI's own thumbnail layout exactly. */
 void get_nextui_art_settings(double *art_width, int *thumb_radius)
 {
     static double cached_art_width = 0.45;
@@ -1210,21 +1245,8 @@ void get_nextui_art_settings(double *art_width, int *thumb_radius)
     if (join_path(path, sizeof(path), dir, "minuisettings.txt")) {
         char *data = read_text_file(path);
         if (data) {
-            char *saveptr = NULL;
-            for (char *line = strtok_r(data, "\n", &saveptr);
-                 line;
-                 line = strtok_r(NULL, "\n", &saveptr)) {
-                int v;
-                if (sscanf(line, "artWidth=%i", &v) == 1) {
-                    if (v < 0) v = 0;
-                    if (v > 100) v = 100;
-                    cached_art_width = v / 100.0;
-                } else if (sscanf(line, "radius=%i", &v) == 1) {
-                    if (v < 0) v = 0;
-                    if (v > 24) v = 24;
-                    cached_thumb_radius = v;
-                }
-            }
+            parse_nextui_art_settings(data, &cached_art_width,
+                                      &cached_thumb_radius);
             free(data);
         }
     }

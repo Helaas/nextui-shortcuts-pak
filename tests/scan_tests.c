@@ -2630,6 +2630,56 @@ cleanup:
     return ok;
 }
 
+static bool test_parse_nextui_art_settings_matches_config_clamps(void)
+{
+    bool ok = false;
+    double art_width;
+    int radius;
+
+    /* Missing keys keep NextUI defaults (0.45 / 20). */
+    art_width = 0.45; radius = 20;
+    parse_nextui_art_settings_for_tests("", &art_width, &radius);
+    CHECK(art_width == 0.45 && radius == 20,
+          "empty input: artWidth=%.2f radius=%d", art_width, radius);
+    parse_nextui_art_settings_for_tests(NULL, &art_width, &radius);
+    CHECK(art_width == 0.45 && radius == 20,
+          "NULL input: artWidth=%.2f radius=%d", art_width, radius);
+    parse_nextui_art_settings_for_tests("font=1\nshowclock=0\n",
+                                        &art_width, &radius);
+    CHECK(art_width == 0.45 && radius == 20,
+          "unrelated keys: artWidth=%.2f radius=%d", art_width, radius);
+
+    /* Normal parse, including CRLF line endings. */
+    art_width = 0.45; radius = 20;
+    parse_nextui_art_settings_for_tests("artWidth=40\r\nradius=12\r\n",
+                                        &art_width, &radius);
+    CHECK(art_width == 0.40 && radius == 12,
+          "CRLF parse: artWidth=%.2f radius=%d", art_width, radius);
+
+    /* Clamps mirror config.c: artWidth 0-100, radius 0-24. */
+    art_width = 0.45; radius = 20;
+    parse_nextui_art_settings_for_tests("artWidth=150\nradius=99\n",
+                                        &art_width, &radius);
+    CHECK(art_width == 1.0 && radius == 24,
+          "upper clamp: artWidth=%.2f radius=%d", art_width, radius);
+    parse_nextui_art_settings_for_tests("artWidth=-5\nradius=-1\n",
+                                        &art_width, &radius);
+    CHECK(art_width == 0.0 && radius == 0,
+          "lower clamp: artWidth=%.2f radius=%d", art_width, radius);
+
+    /* Malformed values are ignored, keeping defaults. */
+    art_width = 0.45; radius = 20;
+    parse_nextui_art_settings_for_tests("artWidth=abc\nradius=\n",
+                                        &art_width, &radius);
+    CHECK(art_width == 0.45 && radius == 20,
+          "malformed: artWidth=%.2f radius=%d", art_width, radius);
+
+    ok = true;
+
+cleanup:
+    return ok;
+}
+
 int main(void)
 {
     static const test_case tests[] = {
@@ -2672,6 +2722,7 @@ int main(void)
         { "rename shortcut with slash uses storage-safe name", test_rename_shortcut_with_slash_uses_storage_safe_name },
         { "hex_to_sc_color parses NextUI color formats", test_hex_to_sc_color_parses_nextui_color_formats },
         { "art layout matches NextUI thumbnail geometry", test_compute_art_layout_matches_nextui_thumbnail_geometry },
+        { "parse NextUI art settings matches config clamps", test_parse_nextui_art_settings_matches_config_clamps },
     };
     int failures = 0;
 
