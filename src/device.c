@@ -1046,18 +1046,41 @@ void get_screen_dimensions(int *w, int *h)
 
 /* ── Theme background color ──────────────────────────────────── */
 
+/* Parse a hex color string. NextUI ≥ v6.12.0 reports colors as 0xRRGGBBAA
+ * (matching uintToColour() in NextUI's api.c); older versions used 0xRRGGBB.
+ * The digit count after the prefix decides which layout to decode. */
 static sc_color hex_to_sc_color(const char *hex)
 {
     sc_color c = {0, 0, 0, 255};
     if (!hex || !hex[0]) return c;
     if (hex[0] == '#') hex++;
     else if (hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X')) hex += 2;
+
+    size_t digits = 0;
+    while (hex_value(hex[digits]) >= 0) digits++;
+    if (hex[digits] != '\0') return c; /* trailing garbage — reject */
+    if (digits != 8 && digits != 6) return c; /* unsupported length */
+
     unsigned long val = strtoul(hex, NULL, 16);
-    c.r = (uint8_t)((val >> 16) & 0xFF);
-    c.g = (uint8_t)((val >>  8) & 0xFF);
-    c.b = (uint8_t)( val        & 0xFF);
+    if (digits == 8) {          /* 0xRRGGBBAA */
+        c.r = (uint8_t)((val >> 24) & 0xFF);
+        c.g = (uint8_t)((val >> 16) & 0xFF);
+        c.b = (uint8_t)((val >>  8) & 0xFF);
+        c.a = (uint8_t)( val        & 0xFF);
+    } else if (digits == 6) {   /* legacy 0xRRGGBB */
+        c.r = (uint8_t)((val >> 16) & 0xFF);
+        c.g = (uint8_t)((val >>  8) & 0xFF);
+        c.b = (uint8_t)( val        & 0xFF);
+    }
     return c;
 }
+
+#ifdef TESTING
+sc_color hex_to_sc_color_for_tests(const char *hex)
+{
+    return hex_to_sc_color(hex);
+}
+#endif
 
 sc_color get_theme_bg_color(void)
 {
@@ -1153,13 +1176,86 @@ sc_color get_theme_bg_color(void)
 
     if (cJSON_IsString(color) && color->valuestring[0]) {
         cached = hex_to_sc_color(color->valuestring);
-        ap_log("get_theme_bg_color: %s → r=%u g=%u b=%u",
-               color->valuestring, cached.r, cached.g, cached.b);
+        ap_log("get_theme_bg_color: %s → r=%u g=%u b=%u a=%u",
+               color->valuestring, cached.r, cached.g, cached.b, cached.a);
     }
 
     cJSON_Delete(json);
     return cached;
 #endif
+}
+
+/* ── NextUI game-art settings ────────────────────────────────── */
+
+/* Parse artWidth (percent) and radius from minuisettings.txt content.
+ * Defaults mirror CFG_DEFAULT_GAMEARTWIDTH / CFG_DEFAULT_THUMBRADIUS;
+ * clamps mirror config.c (artWidth 0-100, radius 0-24).
+ * Mutates data (strtok_r). */
+static void parse_nextui_art_settings(char *data, double *art_width,
+                                      int *thumb_radius)
+{
+    if (!data) return;
+
+    char *saveptr = NULL;
+    for (char *line = strtok_r(data, "\n", &saveptr);
+         line;
+         line = strtok_r(NULL, "\n", &saveptr)) {
+        int v;
+        if (sscanf(line, "artWidth=%i", &v) == 1) {
+            if (v < 0) v = 0;
+            if (v > 100) v = 100;
+            if (art_width) *art_width = v / 100.0;
+        } else if (sscanf(line, "radius=%i", &v) == 1) {
+            if (v < 0) v = 0;
+            if (v > 24) v = 24;
+            if (thumb_radius) *thumb_radius = v;
+        }
+    }
+}
+
+#ifdef TESTING
+void parse_nextui_art_settings_for_tests(const char *data, double *art_width,
+                                         int *thumb_radius)
+{
+    char *copy = data ? strdup(data) : NULL;
+    parse_nextui_art_settings(copy, art_width, thumb_radius);
+    free(copy);
+}
+#endif
+
+/* Read artWidth (percent) and radius from NextUI's minuisettings.txt so
+ * baked-in artwork can match NextUI's own thumbnail layout exactly. */
+void get_nextui_art_settings(double *art_width, int *thumb_radius)
+{
+    static double cached_art_width = 0.45;
+    static int cached_thumb_radius = 20;
+    static bool loaded = false;
+
+    if (loaded) {
+        if (art_width) *art_width = cached_art_width;
+        if (thumb_radius) *thumb_radius = cached_thumb_radius;
+        return;
+    }
+    loaded = true;
+
+#if !defined(PLATFORM_MAC)
+    char dir[SC_MAX_PATH];
+    char path[SC_MAX_PATH];
+    get_shared_userdata_path(dir, sizeof(dir));
+    if (join_path(path, sizeof(path), dir, "minuisettings.txt")) {
+        char *data = read_text_file(path);
+        if (data) {
+            parse_nextui_art_settings(data, &cached_art_width,
+                                      &cached_thumb_radius);
+            free(data);
+        }
+    }
+    ap_log("get_nextui_art_settings: artWidth=%.2f radius=%d",
+           cached_art_width, cached_thumb_radius);
+#endif
+
+    if (art_width) *art_width = cached_art_width;
+    if (thumb_radius) *thumb_radius = cached_thumb_radius;
 }
 
 /* ── Settings (JSON via cJSON) ────────────────────────────────── */

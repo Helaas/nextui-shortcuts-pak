@@ -25,22 +25,6 @@
 
 #ifndef TESTING
 
-/* Scale (srcW, srcH) to fit within (maxW, maxH) preserving aspect ratio. */
-static void thumbnail_fit(int srcW, int srcH, int maxW, int maxH,
-                          int *outW, int *outH)
-{
-    if (srcW <= 0 || srcH <= 0) {
-        *outW = maxW; *outH = maxH;
-        return;
-    }
-    *outW = maxW;
-    *outH = (int)((int64_t)srcH * maxW / srcW);
-    if (*outH > maxH) {
-        *outH = maxH;
-        *outW = (int)((int64_t)srcW * maxH / srcH);
-    }
-}
-
 /* Apply rounded corners to an RGBA surface (set pixels outside arcs to transparent).
  * Ports NextUI's GFX_ApplyRoundedCorners_8888. */
 static void apply_rounded_corners(SDL_Surface *surf, int radius)
@@ -48,6 +32,12 @@ static void apply_rounded_corners(SDL_Surface *surf, int radius)
     int w = surf->w;
     int h = surf->h;
     if (radius <= 0 || w == 0 || h == 0) return;
+
+    /* Clamp so overlapping corner circles can't erase the whole surface
+     * (possible with a tiny artWidth setting and large corner radius). */
+    if (radius > w / 2) radius = w / 2;
+    if (radius > h / 2) radius = h / 2;
+    if (radius <= 0) return;
 
     SDL_LockSurface(surf);
     Uint32 *pixels = (Uint32 *)surf->pixels;
@@ -103,6 +93,79 @@ static void blit_cover(SDL_Surface *src, SDL_Surface *dst)
 }
 
 #endif /* !TESTING */
+
+/* ── NextUI-matching art layout ───────────────────────────────── */
+
+/* NextUI's FIXED_SCALE per platform (platform.h): scales UI metrics from
+ * the 640x480 design base. tg5040 detects the Brick at runtime. */
+static int artwork_fixed_scale(void)
+{
+#if defined(PLATFORM_MY355)
+    return 1;
+#elif defined(PLATFORM_TG5050)
+    return 2;
+#else /* TG5040 / MAC */
+    return g_is_brick ? 3 : 2;
+#endif
+}
+
+typedef struct {
+    int w, h;
+    int x, y;
+    int radius;
+} art_layout;
+
+/* Replicates NextUI's game-art thumbnail layout (nextui.c onThumbLoaded and
+ * the LAYER_THUMBNAIL draw) so art baked into bg.png overlaps NextUI's own
+ * thumbnail layer pixel-perfectly instead of ghosting next to it.
+ *   max_w    = (int)(screen_w * artWidth)   max_h = (int)(screen_h * 0.6)
+ *   margin   = SCALE1(BUTTON_MARGIN*3) = 15 * FIXED_SCALE
+ *   center_y = (int)(screen_h * 0.5) - new_h/2
+ *   radius   = thumbRadius * FIXED_SCALE (NextUI scales the radius by
+ *              img_w/new_w before downscaling, which cancels out) */
+static void compute_art_layout(int screen_w, int screen_h, int img_w, int img_h,
+                               double art_width, int fixed_scale,
+                               int thumb_radius, art_layout *out)
+{
+    int max_w = (int)(screen_w * art_width);
+    int max_h = (int)(screen_h * 0.6);
+    int new_w = max_w;
+    int new_h = max_h;
+
+    if (img_w > 0 && img_h > 0) {
+        double aspect_ratio = (double)img_h / img_w;
+        new_h = (int)(new_w * aspect_ratio);
+        if (new_h > max_h) {
+            new_h = max_h;
+            new_w = (int)(new_h / aspect_ratio);
+        }
+    }
+
+    out->w = new_w;
+    out->h = new_h;
+    out->x = screen_w - (new_w + 15 * fixed_scale);
+    out->y = (int)(screen_h * 0.50) - new_h / 2;
+    out->radius = thumb_radius * fixed_scale;
+}
+
+#ifdef TESTING
+void compute_art_layout_for_tests(int screen_w, int screen_h,
+                                  int img_w, int img_h,
+                                  double art_width, int fixed_scale,
+                                  int thumb_radius,
+                                  int *out_w, int *out_h,
+                                  int *out_x, int *out_y, int *out_radius)
+{
+    art_layout layout;
+    compute_art_layout(screen_w, screen_h, img_w, img_h,
+                       art_width, fixed_scale, thumb_radius, &layout);
+    if (out_w) *out_w = layout.w;
+    if (out_h) *out_h = layout.h;
+    if (out_x) *out_x = layout.x;
+    if (out_y) *out_y = layout.y;
+    if (out_radius) *out_radius = layout.radius;
+}
+#endif
 
 static uint32_t artwork_ticks(void)
 {
@@ -205,36 +268,33 @@ void generate_artwork_bg(const char *art_src_path, const char *dest_folder,
         }
     }
 
-    /* Layer 2: game/tool art thumbnail, right-aligned with rounded corners.
-     *   max_w = screen_w * 0.45
-     *   max_h = screen_h * 0.60
-     *   right margin = 30 px (SCALE1(BUTTON_MARGIN*3) at FIXED_SCALE=2)
-     *   vertically centred at screen_h/2
-     */
+    /* Layer 2: game/tool art thumbnail, positioned exactly like NextUI's
+     * own LAYER_THUMBNAIL draw so the baked-in art and NextUI's thumbnail
+     * layer overlap perfectly (no double-draw ghosting). */
     if (art_img) {
         step_ms = SDL_GetTicks();
-        int maxW = (int)(screen_w * 0.45);
-        int maxH = (int)(screen_h * 0.60);
-        int artW, artH;
-        thumbnail_fit(art_img->w, art_img->h, maxW, maxH, &artW, &artH);
+        double art_width;
+        int thumb_radius;
+        get_nextui_art_settings(&art_width, &thumb_radius);
+
+        art_layout layout;
+        compute_art_layout(screen_w, screen_h, art_img->w, art_img->h,
+                           art_width, artwork_fixed_scale(), thumb_radius,
+                           &layout);
 
         /* Scale art to thumbnail size. */
-        SDL_Surface *scaled_art = create_rgba_surface(artW, artH);
+        SDL_Surface *scaled_art = create_rgba_surface(layout.w, layout.h);
         if (scaled_art) {
             /* Set blend mode to none for the initial scale. */
             SDL_SetSurfaceBlendMode(art_img, SDL_BLENDMODE_NONE);
             SDL_BlitScaled(art_img, NULL, scaled_art, NULL);
 
-            /* Rounded corners (radius = 40 px). */
-            apply_rounded_corners(scaled_art, 40);
+            apply_rounded_corners(scaled_art, layout.radius);
 
-            /* Right-align with margin, vertically centre. */
-            int right_margin = 30;
-            int target_x = screen_w - artW - right_margin;
+            int target_x = layout.x;
             if (target_x < 0) target_x = 0;
-            int center_y = screen_h / 2 - artH / 2;
 
-            SDL_Rect dst_rect = { target_x, center_y, artW, artH };
+            SDL_Rect dst_rect = { target_x, layout.y, layout.w, layout.h };
             SDL_SetSurfaceBlendMode(scaled_art, SDL_BLENDMODE_BLEND);
             SDL_BlitSurface(scaled_art, NULL, canvas, &dst_rect);
 

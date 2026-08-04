@@ -2541,6 +2541,145 @@ cleanup:
     return ok;
 }
 
+static bool test_hex_to_sc_color_parses_nextui_color_formats(void)
+{
+    bool ok = false;
+    sc_color c;
+
+    /* NextUI ≥ v6.12.0 format: 0xRRGGBBAA. Default black must stay black
+     * (regression: it used to decode as pure blue). */
+    c = hex_to_sc_color_for_tests("0x000000FF");
+    CHECK(c.r == 0 && c.g == 0 && c.b == 0 && c.a == 255,
+          "0x000000FF decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+
+    c = hex_to_sc_color_for_tests("0x11223344");
+    CHECK(c.r == 0x11 && c.g == 0x22 && c.b == 0x33 && c.a == 0x44,
+          "0x11223344 decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+
+    /* Legacy 0xRRGGBB format (bgcolor fallback on NextUI < v6.12.0). */
+    c = hex_to_sc_color_for_tests("0x112233");
+    CHECK(c.r == 0x11 && c.g == 0x22 && c.b == 0x33 && c.a == 255,
+          "0x112233 decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+
+    /* '#' prefix with alpha. */
+    c = hex_to_sc_color_for_tests("#A1B2C3D4");
+    CHECK(c.r == 0xA1 && c.g == 0xB2 && c.b == 0xC3 && c.a == 0xD4,
+          "#A1B2C3D4 decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+
+    /* Invalid input falls back to opaque black. */
+    c = hex_to_sc_color_for_tests("");
+    CHECK(c.r == 0 && c.g == 0 && c.b == 0 && c.a == 255,
+          "empty string decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+    c = hex_to_sc_color_for_tests(NULL);
+    CHECK(c.r == 0 && c.g == 0 && c.b == 0 && c.a == 255,
+          "NULL decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+    c = hex_to_sc_color_for_tests("0x12345");
+    CHECK(c.r == 0 && c.g == 0 && c.b == 0 && c.a == 255,
+          "5-digit string decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+    c = hex_to_sc_color_for_tests("0xZZZZZZZZ");
+    CHECK(c.r == 0 && c.g == 0 && c.b == 0 && c.a == 255,
+          "non-hex string decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+
+    ok = true;
+
+cleanup:
+    return ok;
+}
+
+static bool test_compute_art_layout_matches_nextui_thumbnail_geometry(void)
+{
+    bool ok = false;
+    int w, h, x, y, radius;
+
+    /* Brick (1024x768, FIXED_SCALE=3), default artWidth=0.45, radius=20.
+     * NextUI: max_w=460, 460x345 fits; x=1024-(460+45)=519; y=384-172=212. */
+    compute_art_layout_for_tests(1024, 768, 460, 345, 0.45, 3, 20,
+                                 &w, &h, &x, &y, &radius);
+    CHECK(w == 460 && h == 345 && x == 519 && y == 212 && radius == 60,
+          "brick layout: w=%d h=%d x=%d y=%d r=%d", w, h, x, y, radius);
+
+    /* tg5040 non-Brick (1280x720, FIXED_SCALE=2): max_w=576, margin=30. */
+    compute_art_layout_for_tests(1280, 720, 460, 345, 0.45, 2, 20,
+                                 &w, &h, &x, &y, &radius);
+    CHECK(w == 576 && h == 432 && x == 674 && y == 144 && radius == 40,
+          "tg5040 layout: w=%d h=%d x=%d y=%d r=%d", w, h, x, y, radius);
+
+    /* Tall art hits the max_h cap (0.6*768=460): 300x600 -> 230x460. */
+    compute_art_layout_for_tests(1024, 768, 300, 600, 0.45, 3, 20,
+                                 &w, &h, &x, &y, &radius);
+    CHECK(w == 230 && h == 460 && x == 749 && y == 154 && radius == 60,
+          "capped layout: w=%d h=%d x=%d y=%d r=%d", w, h, x, y, radius);
+
+    /* Custom user settings: artWidth=40%%, radius=12 (Brick). */
+    compute_art_layout_for_tests(1024, 768, 460, 345, 0.40, 3, 12,
+                                 &w, &h, &x, &y, &radius);
+    CHECK(w == 409 && h == 306 && x == 570 && y == 231 && radius == 36,
+          "custom layout: w=%d h=%d x=%d y=%d r=%d", w, h, x, y, radius);
+
+    ok = true;
+
+cleanup:
+    return ok;
+}
+
+static bool test_parse_nextui_art_settings_matches_config_clamps(void)
+{
+    bool ok = false;
+    double art_width;
+    int radius;
+
+    /* Missing keys keep NextUI defaults (0.45 / 20). */
+    art_width = 0.45; radius = 20;
+    parse_nextui_art_settings_for_tests("", &art_width, &radius);
+    CHECK(art_width == 0.45 && radius == 20,
+          "empty input: artWidth=%.2f radius=%d", art_width, radius);
+    parse_nextui_art_settings_for_tests(NULL, &art_width, &radius);
+    CHECK(art_width == 0.45 && radius == 20,
+          "NULL input: artWidth=%.2f radius=%d", art_width, radius);
+    parse_nextui_art_settings_for_tests("font=1\nshowclock=0\n",
+                                        &art_width, &radius);
+    CHECK(art_width == 0.45 && radius == 20,
+          "unrelated keys: artWidth=%.2f radius=%d", art_width, radius);
+
+    /* Normal parse, including CRLF line endings. */
+    art_width = 0.45; radius = 20;
+    parse_nextui_art_settings_for_tests("artWidth=40\r\nradius=12\r\n",
+                                        &art_width, &radius);
+    CHECK(art_width == 0.40 && radius == 12,
+          "CRLF parse: artWidth=%.2f radius=%d", art_width, radius);
+
+    /* Clamps mirror config.c: artWidth 0-100, radius 0-24. */
+    art_width = 0.45; radius = 20;
+    parse_nextui_art_settings_for_tests("artWidth=150\nradius=99\n",
+                                        &art_width, &radius);
+    CHECK(art_width == 1.0 && radius == 24,
+          "upper clamp: artWidth=%.2f radius=%d", art_width, radius);
+    parse_nextui_art_settings_for_tests("artWidth=-5\nradius=-1\n",
+                                        &art_width, &radius);
+    CHECK(art_width == 0.0 && radius == 0,
+          "lower clamp: artWidth=%.2f radius=%d", art_width, radius);
+
+    /* Malformed values are ignored, keeping defaults. */
+    art_width = 0.45; radius = 20;
+    parse_nextui_art_settings_for_tests("artWidth=abc\nradius=\n",
+                                        &art_width, &radius);
+    CHECK(art_width == 0.45 && radius == 20,
+          "malformed: artWidth=%.2f radius=%d", art_width, radius);
+
+    ok = true;
+
+cleanup:
+    return ok;
+}
+
 int main(void)
 {
     static const test_case tests[] = {
@@ -2581,6 +2720,9 @@ int main(void)
         { "rename shortcut updates layout for all positions", test_rename_shortcut_updates_layout_for_all_positions },
         { "renamed shortcut is detected by rom target", test_renamed_shortcut_is_detected_by_rom_target },
         { "rename shortcut with slash uses storage-safe name", test_rename_shortcut_with_slash_uses_storage_safe_name },
+        { "hex_to_sc_color parses NextUI color formats", test_hex_to_sc_color_parses_nextui_color_formats },
+        { "art layout matches NextUI thumbnail geometry", test_compute_art_layout_matches_nextui_thumbnail_geometry },
+        { "parse NextUI art settings matches config clamps", test_parse_nextui_art_settings_matches_config_clamps },
     };
     int failures = 0;
 
