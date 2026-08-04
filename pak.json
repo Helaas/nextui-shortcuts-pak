@@ -1,12 +1,13 @@
 {
   "name": "Shortcuts",
-  "version": "v2.2.0",
+  "version": "v2.2.1",
   "type": "TOOL",
   "description": "Create and manage main menu shortcuts for ROMs and Tools on NextUI.",
   "author": "Helaas",
   "repo_url": "https://github.com/Helaas/nextui-shortcuts-pak",
   "release_filename": "Shortcuts.pakz",
   "changelog": {
+    "v2.2.1": "Fixes blue-tinted shortcut artwork backgrounds caused by NextUI's RGBA theme color format.",
     "v2.2.0": "Fixes incorrect colors with NextUI's RGBA theme format.",
     "v2.1.0": "NextUI ≥ v6.11.0: X to Resume now works on ROM shortcuts. Cleaner Game Switcher & Recently Played with no duplicates or tool entries.",
     "v2.0.0": "Add Miyoo Flip support and ability to rename shortcuts. Major rework porting app from Gabagool to Apostrophe.",

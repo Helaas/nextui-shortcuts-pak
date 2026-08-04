@@ -2541,6 +2541,59 @@ cleanup:
     return ok;
 }
 
+static bool test_hex_to_sc_color_parses_nextui_color_formats(void)
+{
+    bool ok = false;
+    sc_color c;
+
+    /* NextUI ≥ v6.12.0 format: 0xRRGGBBAA. Default black must stay black
+     * (regression: it used to decode as pure blue). */
+    c = hex_to_sc_color_for_tests("0x000000FF");
+    CHECK(c.r == 0 && c.g == 0 && c.b == 0 && c.a == 255,
+          "0x000000FF decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+
+    c = hex_to_sc_color_for_tests("0x11223344");
+    CHECK(c.r == 0x11 && c.g == 0x22 && c.b == 0x33 && c.a == 0x44,
+          "0x11223344 decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+
+    /* Legacy 0xRRGGBB format (bgcolor fallback on NextUI < v6.12.0). */
+    c = hex_to_sc_color_for_tests("0x112233");
+    CHECK(c.r == 0x11 && c.g == 0x22 && c.b == 0x33 && c.a == 255,
+          "0x112233 decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+
+    /* '#' prefix with alpha. */
+    c = hex_to_sc_color_for_tests("#A1B2C3D4");
+    CHECK(c.r == 0xA1 && c.g == 0xB2 && c.b == 0xC3 && c.a == 0xD4,
+          "#A1B2C3D4 decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+
+    /* Invalid input falls back to opaque black. */
+    c = hex_to_sc_color_for_tests("");
+    CHECK(c.r == 0 && c.g == 0 && c.b == 0 && c.a == 255,
+          "empty string decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+    c = hex_to_sc_color_for_tests(NULL);
+    CHECK(c.r == 0 && c.g == 0 && c.b == 0 && c.a == 255,
+          "NULL decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+    c = hex_to_sc_color_for_tests("0x12345");
+    CHECK(c.r == 0 && c.g == 0 && c.b == 0 && c.a == 255,
+          "5-digit string decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+    c = hex_to_sc_color_for_tests("0xZZZZZZZZ");
+    CHECK(c.r == 0 && c.g == 0 && c.b == 0 && c.a == 255,
+          "non-hex string decoded as r=%u g=%u b=%u a=%u",
+          c.r, c.g, c.b, c.a);
+
+    ok = true;
+
+cleanup:
+    return ok;
+}
+
 int main(void)
 {
     static const test_case tests[] = {
@@ -2581,6 +2634,7 @@ int main(void)
         { "rename shortcut updates layout for all positions", test_rename_shortcut_updates_layout_for_all_positions },
         { "renamed shortcut is detected by rom target", test_renamed_shortcut_is_detected_by_rom_target },
         { "rename shortcut with slash uses storage-safe name", test_rename_shortcut_with_slash_uses_storage_safe_name },
+        { "hex_to_sc_color parses NextUI color formats", test_hex_to_sc_color_parses_nextui_color_formats },
     };
     int failures = 0;
 

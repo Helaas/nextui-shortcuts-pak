@@ -1046,18 +1046,41 @@ void get_screen_dimensions(int *w, int *h)
 
 /* ── Theme background color ──────────────────────────────────── */
 
+/* Parse a hex color string. NextUI ≥ v6.12.0 reports colors as 0xRRGGBBAA
+ * (matching uintToColour() in NextUI's api.c); older versions used 0xRRGGBB.
+ * The digit count after the prefix decides which layout to decode. */
 static sc_color hex_to_sc_color(const char *hex)
 {
     sc_color c = {0, 0, 0, 255};
     if (!hex || !hex[0]) return c;
     if (hex[0] == '#') hex++;
     else if (hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X')) hex += 2;
+
+    size_t digits = 0;
+    while (hex_value(hex[digits]) >= 0) digits++;
+    if (hex[digits] != '\0') return c; /* trailing garbage — reject */
+    if (digits != 8 && digits != 6) return c; /* unsupported length */
+
     unsigned long val = strtoul(hex, NULL, 16);
-    c.r = (uint8_t)((val >> 16) & 0xFF);
-    c.g = (uint8_t)((val >>  8) & 0xFF);
-    c.b = (uint8_t)( val        & 0xFF);
+    if (digits == 8) {          /* 0xRRGGBBAA */
+        c.r = (uint8_t)((val >> 24) & 0xFF);
+        c.g = (uint8_t)((val >> 16) & 0xFF);
+        c.b = (uint8_t)((val >>  8) & 0xFF);
+        c.a = (uint8_t)( val        & 0xFF);
+    } else if (digits == 6) {   /* legacy 0xRRGGBB */
+        c.r = (uint8_t)((val >> 16) & 0xFF);
+        c.g = (uint8_t)((val >>  8) & 0xFF);
+        c.b = (uint8_t)( val        & 0xFF);
+    }
     return c;
 }
+
+#ifdef TESTING
+sc_color hex_to_sc_color_for_tests(const char *hex)
+{
+    return hex_to_sc_color(hex);
+}
+#endif
 
 sc_color get_theme_bg_color(void)
 {
@@ -1153,8 +1176,8 @@ sc_color get_theme_bg_color(void)
 
     if (cJSON_IsString(color) && color->valuestring[0]) {
         cached = hex_to_sc_color(color->valuestring);
-        ap_log("get_theme_bg_color: %s → r=%u g=%u b=%u",
-               color->valuestring, cached.r, cached.g, cached.b);
+        ap_log("get_theme_bg_color: %s → r=%u g=%u b=%u a=%u",
+               color->valuestring, cached.r, cached.g, cached.b, cached.a);
     }
 
     cJSON_Delete(json);

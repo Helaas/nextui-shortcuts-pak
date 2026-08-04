@@ -193,6 +193,7 @@ bool shortcut_exists(const char *display_name, const char *tag);
 void ensure_bridge_emu(void);
 #ifdef TESTING
 const char *bridge_launch_script_for_tests(void);
+sc_color hex_to_sc_color_for_tests(const char *hex);
 #endif
 
 /* ── resume_sync.c ────────────────────────────────────────────── */
