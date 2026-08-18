@@ -235,10 +235,10 @@ make tg5040
 make tg5050
 make my355
 
-# Package the universal binary into all four platform trees
+# Stage the universal Pak contents once
 make package-universal
 
-# Package .pak.zip files per platform and a combined .pakz
+# Build one platform-neutral Pak Store archive
 make package
 
 # Detect an adb target and deploy the matching build
@@ -255,8 +255,8 @@ make help
 | tg5040 | `build/release/tg5040/Shortcuts.pak.zip` |
 | tg5050 | `build/release/tg5050/Shortcuts.pak.zip` |
 | my355 | `build/release/my355/Shortcuts.pak.zip` |
-| h700 | `build/release/h700/Shortcuts.pak.zip` |
-| package | `build/release/all/Shortcuts.pakz` |
+| universal | `build/release/universal/Shortcuts.pak.zip` |
+| package | `build/release/all/Shortcuts.pak.zip` |
 
 The `.pak.zip` includes the binary, `launch.sh`, `pak.json`, `LICENSE`, and any staged runtime libraries.
 
@@ -264,7 +264,7 @@ The `.pak.zip` includes the binary, `launch.sh`, `pak.json`, `LICENSE`, and any 
 
 1. Build and package: `make package`
 2. To install a single-platform build manually, extract `build/release/<platform>/Shortcuts.pak.zip` to `Tools/<platform>/Shortcuts.pak/` on your SD card
-3. To use the combined package, place `build/release/all/Shortcuts.pakz` in the root of your SD card; NextUI will auto-install it upon (re)boot
+3. Install `build/release/all/Shortcuts.pak.zip` through Pak Store, or extract its contents into `Tools/<platform>/Shortcuts.pak`
 4. Launch from the NextUI Tools menu
 
 ## Acknowledgements

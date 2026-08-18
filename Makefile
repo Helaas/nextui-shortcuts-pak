@@ -10,7 +10,7 @@ APOSTROPHE_DIR := third_party/apostrophe
 APOSTROPHE_BRANCH := main
 BUILD_DIR := build
 DIST_DIR := $(BUILD_DIR)/release
-STAGING_DIR := $(BUILD_DIR)/staging
+RELEASE_FILENAME := Shortcuts.pak.zip
 CACHE_DIR := .cache
 NEXTUI_PREVIEW_CACHE := $(CACHE_DIR)/nextui-preview
 TEST_BUILD_DIR := $(BUILD_DIR)/tests
@@ -130,14 +130,10 @@ package-my355: my355
 	@$(MAKE) do-package PLATFORM=my355 BIN_SRC=$(BUILD_DIR)/my355/$(APP_NAME)
 
 package-universal: universal
-	@set -e; for platform in tg5040 tg5050 my355 h700; do \
-		$(MAKE) do-package PLATFORM=$$platform BIN_SRC=$(BUILD_DIR)/universal/$(APP_NAME); \
-	done
-	@set -e; for platform in tg5040 tg5050 my355 h700; do \
-		cmp -s "$(BUILD_DIR)/universal/$(APP_NAME)" \
-			"$(BUILD_DIR)/$$platform/$(PAK_NAME).pak/$(APP_NAME)"; \
-	done
-	@echo "Verified one identical device binary in all four package trees."
+	@$(MAKE) do-package PLATFORM=universal BIN_SRC=$(BUILD_DIR)/universal/$(APP_NAME)
+	@cmp -s "$(BUILD_DIR)/universal/$(APP_NAME)" \
+		"$(BUILD_DIR)/universal/$(PAK_NAME).pak/$(APP_NAME)"
+	@echo "Verified the packaged universal device binary."
 
 do-package:
 	@if [ -z "$(PLATFORM)" ] || [ -z "$(BIN_SRC)" ]; then \
@@ -151,22 +147,13 @@ do-package:
 	@if [ -f LICENSE ]; then cp LICENSE $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak/; fi
 	@mkdir -p $(DIST_DIR)/$(PLATFORM)
 	@rm -f $(DIST_DIR)/$(PLATFORM)/$(PAK_NAME).pak.zip
-	@cd $(BUILD_DIR)/$(PLATFORM) && zip -r "$(CURDIR)/$(DIST_DIR)/$(PLATFORM)/$(PAK_NAME).pak.zip" "$(PAK_NAME).pak" -x '.*'
+	@cd $(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak && zip -r "$(CURDIR)/$(DIST_DIR)/$(PLATFORM)/$(PAK_NAME).pak.zip" . -x '.*'
 
 package: package-universal
-	@rm -rf $(STAGING_DIR)
-	@for platform in tg5040 tg5050 my355 h700; do \
-		mkdir -p "$(STAGING_DIR)/Tools/$$platform"; \
-		cp -a "$(BUILD_DIR)/$$platform/$(PAK_NAME).pak" "$(STAGING_DIR)/Tools/$$platform/"; \
-	done
-	@# Include SHORTCUT.pak bridge emu for tool shortcuts
-	@for platform in tg5040 tg5050 my355 h700; do \
-		mkdir -p "$(STAGING_DIR)/Emus/$$platform/SHORTCUT.pak"; \
-		cp resources/SHORTCUT.pak/launch.sh "$(STAGING_DIR)/Emus/$$platform/SHORTCUT.pak/"; \
-	done
 	@mkdir -p $(DIST_DIR)/all
-	@rm -f $(DIST_DIR)/all/$(PAK_NAME).pakz
-	@cd $(STAGING_DIR) && zip -9 -r "$(CURDIR)/$(DIST_DIR)/all/$(PAK_NAME).pakz" . -x '.*'
+	@rm -f $(DIST_DIR)/all/$(RELEASE_FILENAME) $(DIST_DIR)/all/$(PAK_NAME).pakz
+	@cp $(DIST_DIR)/universal/$(PAK_NAME).pak.zip $(DIST_DIR)/all/$(RELEASE_FILENAME)
+	@unzip -Z1 $(DIST_DIR)/all/$(RELEASE_FILENAME) | grep -qx "$(APP_NAME)"
 
 # ── ADB deploy ──────────────────────────────────────────────
 
@@ -219,14 +206,9 @@ deploy-platform:
 	@ADB_CMD="$(ADB) -s $(SERIAL)"; \
 	TOOLS_ROOT="/mnt/SDCARD/Tools/$(PLATFORM)"; \
 	TOOLS_DIR="$$TOOLS_ROOT/$(PAK_NAME).pak"; \
-	EMUS_ROOT="/mnt/SDCARD/Emus/$(PLATFORM)"; \
-	EMUS_DIR="$$EMUS_ROOT/SHORTCUT.pak"; \
 	echo "Deploying $(PAK_NAME).pak to $$TOOLS_DIR..."; \
 	$$ADB_CMD shell "rm -rf '$$TOOLS_DIR' && mkdir -p '$$TOOLS_ROOT'"; \
-	$$ADB_CMD push "$(BUILD_DIR)/$(PLATFORM)/$(PAK_NAME).pak" "$$TOOLS_ROOT/"; \
-	echo "Deploying SHORTCUT.pak bridge emu to $$EMUS_DIR..."; \
-	$$ADB_CMD shell "mkdir -p '$$EMUS_DIR'"; \
-	$$ADB_CMD push "resources/SHORTCUT.pak/launch.sh" "$$EMUS_DIR/"; \
+	$$ADB_CMD push "$(BUILD_DIR)/universal/$(PAK_NAME).pak" "$$TOOLS_ROOT/"; \
 	echo "Deploy complete."
 
 # ── Cleanup ─────────────────────────────────────────────────
@@ -251,6 +233,6 @@ help:
 	@echo "  update-apostrophe  Pin Apostrophe submodule to origin/main"
 	@echo "  setup-nextui-preview-cache  Fetch pinned NextUI preview sprites into .cache"
 	@echo "  clean-nextui-preview-cache  Remove the cached desktop preview assets"
-	@echo "  package       Package the universal binary for all platforms"
+	@echo "  package       Build the platform-neutral Pak Store archive"
 	@echo "  deploy        Detect adb platform, package, and push"
 	@echo "  clean         Remove build artifacts"
