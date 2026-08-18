@@ -100,13 +100,17 @@ static void blit_cover(SDL_Surface *src, SDL_Surface *dst)
  * the 640x480 design base. tg5040 detects the Brick at runtime. */
 static int artwork_fixed_scale(void)
 {
-#if defined(PLATFORM_MY355)
-    return 1;
-#elif defined(PLATFORM_TG5050)
-    return 2;
-#else /* TG5040 / MAC */
-    return g_is_brick ? 3 : 2;
+#ifndef TESTING
+    if (ap_is_device()) {
+        if (ap_get_platform() == AP_PLATFORM_MY355)
+            return 1;
+        if (ap_get_platform() == AP_PLATFORM_TG5040 && g_is_brick)
+            return 3;
+        return 2;
+    }
 #endif
+
+    return g_is_brick ? 3 : 2;
 }
 
 typedef struct {

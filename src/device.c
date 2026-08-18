@@ -884,15 +884,23 @@ int rmdir_recursive(const char *path)
 
 /* ── Path resolution ──────────────────────────────────────────── */
 
-#if defined(PLATFORM_MAC)
-    #define PLATFORM_SUBDIR "tg5040"
-#elif defined(PLATFORM_TG5050)
-    #define PLATFORM_SUBDIR "tg5050"
-#elif defined(PLATFORM_MY355)
-    #define PLATFORM_SUBDIR "my355"
-#else /* TG5040 */
-    #define PLATFORM_SUBDIR "tg5040"
+static const char *platform_subdir(void)
+{
+#ifndef TESTING
+    if (ap_is_device())
+        return ap_get_platform_name();
 #endif
+
+    const char *platform = getenv("PLATFORM");
+    if (platform &&
+        (strcmp(platform, "tg5040") == 0 ||
+         strcmp(platform, "tg5050") == 0 ||
+         strcmp(platform, "my355") == 0 ||
+         strcmp(platform, "h700") == 0))
+        return platform;
+
+    return "tg5040";
+}
 
 void get_roms_path(char *out, int out_size)
 {
@@ -913,13 +921,14 @@ void get_tools_path(char *out, int out_size)
 #if defined(PLATFORM_MAC)
     char cwd[SC_MAX_PATH];
     if (getcwd(cwd, sizeof(cwd)))
-        snprintf(out, out_size, "%s/mock_sdcard/Tools/" PLATFORM_SUBDIR, cwd);
+        snprintf(out, out_size, "%s/mock_sdcard/Tools/%s", cwd,
+                 platform_subdir());
     else
-        snprintf(out, out_size, "./mock_sdcard/Tools/" PLATFORM_SUBDIR);
+        snprintf(out, out_size, "./mock_sdcard/Tools/%s", platform_subdir());
 #else
     const char *sd = getenv("SDCARD_PATH");
-    snprintf(out, out_size, "%s/Tools/" PLATFORM_SUBDIR,
-             sd && sd[0] ? sd : "/mnt/SDCARD");
+    snprintf(out, out_size, "%s/Tools/%s",
+             sd && sd[0] ? sd : "/mnt/SDCARD", platform_subdir());
 #endif
 }
 
@@ -928,13 +937,14 @@ void get_emus_path(char *out, int out_size)
 #if defined(PLATFORM_MAC)
     char cwd[SC_MAX_PATH];
     if (getcwd(cwd, sizeof(cwd)))
-        snprintf(out, out_size, "%s/mock_sdcard/Emus/" PLATFORM_SUBDIR, cwd);
+        snprintf(out, out_size, "%s/mock_sdcard/Emus/%s", cwd,
+                 platform_subdir());
     else
-        snprintf(out, out_size, "./mock_sdcard/Emus/" PLATFORM_SUBDIR);
+        snprintf(out, out_size, "./mock_sdcard/Emus/%s", platform_subdir());
 #else
     const char *sd = getenv("SDCARD_PATH");
-    snprintf(out, out_size, "%s/Emus/" PLATFORM_SUBDIR,
-             sd && sd[0] ? sd : "/mnt/SDCARD");
+    snprintf(out, out_size, "%s/Emus/%s",
+             sd && sd[0] ? sd : "/mnt/SDCARD", platform_subdir());
 #endif
 }
 
@@ -943,9 +953,11 @@ void get_userdata_path(char *out, int out_size)
 #if defined(PLATFORM_MAC)
     char cwd[SC_MAX_PATH];
     if (getcwd(cwd, sizeof(cwd)))
-        snprintf(out, out_size, "%s/mock_sdcard/.userdata/" PLATFORM_SUBDIR, cwd);
+        snprintf(out, out_size, "%s/mock_sdcard/.userdata/%s", cwd,
+                 platform_subdir());
     else
-        snprintf(out, out_size, "./mock_sdcard/.userdata/" PLATFORM_SUBDIR);
+        snprintf(out, out_size, "./mock_sdcard/.userdata/%s",
+                 platform_subdir());
 #else
     const char *userdata = getenv("USERDATA_PATH");
     const char *sd = getenv("SDCARD_PATH");
@@ -955,8 +967,8 @@ void get_userdata_path(char *out, int out_size)
         return;
     }
 
-    snprintf(out, out_size, "%s/.userdata/" PLATFORM_SUBDIR,
-             sd && sd[0] ? sd : "/mnt/SDCARD");
+    snprintf(out, out_size, "%s/.userdata/%s",
+             sd && sd[0] ? sd : "/mnt/SDCARD", platform_subdir());
 #endif
 }
 
@@ -987,9 +999,11 @@ void get_logs_path(char *out, int out_size)
 #if defined(PLATFORM_MAC)
     char cwd[SC_MAX_PATH];
     if (getcwd(cwd, sizeof(cwd)))
-        snprintf(out, out_size, "%s/mock_sdcard/.userdata/" PLATFORM_SUBDIR "/logs", cwd);
+        snprintf(out, out_size, "%s/mock_sdcard/.userdata/%s/logs", cwd,
+                 platform_subdir());
     else
-        snprintf(out, out_size, "./mock_sdcard/.userdata/" PLATFORM_SUBDIR "/logs");
+        snprintf(out, out_size, "./mock_sdcard/.userdata/%s/logs",
+                 platform_subdir());
 #else
     const char *logs = getenv("LOGS_PATH");
 
@@ -1034,14 +1048,21 @@ void get_global_bg_path(char *out, int out_size)
 
 void get_screen_dimensions(int *w, int *h)
 {
-#if defined(PLATFORM_MY355)
-    *w = 640; *h = 480;
-#elif defined(PLATFORM_TG5040) || defined(PLATFORM_MAC)
-    if (g_is_brick) { *w = 1024; *h = 768; }
-    else            { *w = 1280; *h = 720; }
-#else /* TG5050 */
-    *w = 1280; *h = 720;
+#ifndef TESTING
+    if (ap_is_device()) {
+        *w = ap_get_screen_width();
+        *h = ap_get_screen_height();
+        return;
+    }
 #endif
+
+    if (strcmp(platform_subdir(), "my355") == 0) {
+        *w = 640; *h = 480;
+    } else if (strcmp(platform_subdir(), "tg5040") == 0 && g_is_brick) {
+        *w = 1024; *h = 768;
+    } else {
+        *w = 1280; *h = 720;
+    }
 }
 
 /* ── Theme background color ──────────────────────────────────── */
@@ -1105,10 +1126,11 @@ sc_color get_theme_bg_color(void)
             nextval_path = nextval_env_buf;
     }
     if (!nextval_path) {
-        static const char *fallback =
-            "/mnt/SDCARD/.system/" PLATFORM_SUBDIR "/bin/nextval.elf";
-        if (access(fallback, X_OK) == 0)
-            nextval_path = fallback;
+        snprintf(nextval_env_buf, sizeof(nextval_env_buf),
+                 "/mnt/SDCARD/.system/%s/bin/nextval.elf",
+                 platform_subdir());
+        if (access(nextval_env_buf, X_OK) == 0)
+            nextval_path = nextval_env_buf;
     }
     if (!nextval_path) {
         ap_log("get_theme_bg_color: nextval.elf not found, using black");

@@ -48,10 +48,10 @@ int main(int argc, char *argv[])
 
     ap_config cfg = {0};
     cfg.window_title = "Shortcuts";
-    cfg.font_path    = AP_PLATFORM_IS_DEVICE ? NULL
+    cfg.font_path    = ap_is_device() ? NULL
                        : "third_party/apostrophe/res/font.ttf";
     cfg.log_path     = ap_resolve_log_path("shortcuts");
-    cfg.is_nextui    = AP_PLATFORM_IS_DEVICE;
+    cfg.is_nextui    = ap_is_device();
     cfg.cpu_speed    = AP_CPU_SPEED_MENU;
 
     if (ap_init(&cfg) != AP_OK) {
@@ -60,7 +60,8 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    ap_log("startup: platform=%s is_brick=%d", AP_PLATFORM_NAME, g_is_brick);
+    ap_log("startup: platform=%s is_brick=%d", ap_get_platform_name(),
+           g_is_brick);
 
     ensure_bridge_emu();
     if (ensure_resume_hook_installed() != 0)

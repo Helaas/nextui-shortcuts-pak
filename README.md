@@ -1,6 +1,6 @@
 # Shortcuts
 
-Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050/my355 devices. This Pak uses Apostrophe for a native UI and builds the shortcut folders and `.m3u` files that NextUI auto-launches.
+Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050/my355/h700 devices. This Pak uses Apostrophe for a native UI and builds the shortcut folders and `.m3u` files that NextUI auto-launches.
 
 ## Supported Platforms
 
@@ -10,6 +10,7 @@ Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050
 | `tg5040` (TG3040) | TrimUI Brick | 1024×768 | Docker (ARM64) |
 | `tg5050` | TrimUI Smart Pro S | 1280×720 | Docker (ARM64) |
 | `my355` | Miyoo Flip | 640×480 | Docker (ARM64) |
+| `h700` | Anbernic H700 devices | 720×480 | Docker (ARM64) |
 
 > The Brick and Smart Pro share the same `tg5040` filesystem layout (tools, roms, settings paths are identical). The pak auto-detects the Brick via the `DEVICE` environment variable (`"brick"` vs `"smartpro"`), which NextUI's `launch.sh` exports at startup, and generates correctly sized `bg.png` images at 1024×768.
 
@@ -211,7 +212,7 @@ The platform is read from `PLATFORM`. If not set, it defaults to `tg5040`.
 brew install sdl2 sdl2_ttf sdl2_image
 ```
 
-**Embedded (tg5040/tg5050/my355):**
+**Embedded (tg5040/tg5050/my355/h700):**
 - Docker with ARM64 support
 
 ### First-Time Setup
@@ -223,7 +224,7 @@ git submodule update --init --recursive
 ### Build Commands
 
 ```bash
-# Build all embedded platforms
+# Build one binary for all embedded platforms
 make all
 
 # Build for macOS development
@@ -233,6 +234,9 @@ make mac
 make tg5040
 make tg5050
 make my355
+
+# Package the universal binary into all four platform trees
+make package-universal
 
 # Package .pak.zip files per platform and a combined .pakz
 make package
@@ -251,6 +255,7 @@ make help
 | tg5040 | `build/release/tg5040/Shortcuts.pak.zip` |
 | tg5050 | `build/release/tg5050/Shortcuts.pak.zip` |
 | my355 | `build/release/my355/Shortcuts.pak.zip` |
+| h700 | `build/release/h700/Shortcuts.pak.zip` |
 | package | `build/release/all/Shortcuts.pakz` |
 
 The `.pak.zip` includes the binary, `launch.sh`, `pak.json`, `LICENSE`, and any staged runtime libraries.
