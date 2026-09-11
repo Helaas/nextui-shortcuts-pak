@@ -17,6 +17,7 @@ TEST_BUILD_DIR := $(BUILD_DIR)/tests
 TEST_BIN := $(TEST_BUILD_DIR)/scan_tests
 SRC_FILES := $(shell find src -name '*.c' -print | sort)
 TEST_SRC_FILES := tests/scan_tests.c tests/test_stubs.c src/device.c src/artwork.c src/resume_sync.c src/cjson/cjson.c
+TEST_HDR_FILES := $(wildcard src/*.h src/cjson/*.h)
 
 TG5040_TOOLCHAIN := ghcr.io/loveretro/tg5040-toolchain:latest
 TG5050_TOOLCHAIN := ghcr.io/loveretro/tg5050-toolchain:latest
@@ -74,7 +75,7 @@ setup-nextui-preview-cache: $(APOSTROPHE_DIR)/include/apostrophe.h
 clean-nextui-preview-cache:
 	rm -rf $(NEXTUI_PREVIEW_CACHE)
 
-$(TEST_BIN): $(TEST_SRC_FILES)
+$(TEST_BIN): $(TEST_SRC_FILES) $(TEST_HDR_FILES) Makefile
 	@mkdir -p $(TEST_BUILD_DIR)
 	cc -std=gnu11 -O0 -g \
 		-DPLATFORM_MAC -DTESTING \
@@ -85,10 +86,11 @@ $(TEST_BIN): $(TEST_SRC_FILES)
 
 test-native: $(TEST_BIN)
 	./$(TEST_BIN)
+	bash tests/build_tests.sh
 
 # ── Docker cross-compilation ────────────────────────────────
 
-universal:
+universal: $(APOSTROPHE_DIR)/include/apostrophe.h
 	@mkdir -p $(BUILD_DIR)/universal
 	docker run --rm \
 		-v "$(CURDIR)":/workspace \
@@ -203,7 +205,8 @@ deploy-platform:
 		exit 1; \
 	fi
 	@$(MAKE) package-universal
-	@ADB_CMD="$(ADB) -s $(SERIAL)"; \
+	@set -e; \
+	ADB_CMD="$(ADB) -s $(SERIAL)"; \
 	TOOLS_ROOT="/mnt/SDCARD/Tools/$(PLATFORM)"; \
 	TOOLS_DIR="$$TOOLS_ROOT/$(PAK_NAME).pak"; \
 	echo "Deploying $(PAK_NAME).pak to $$TOOLS_DIR..."; \

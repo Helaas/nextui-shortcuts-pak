@@ -1,0 +1,79 @@
+name: Release
+
+# Publish a new pak.json version when it reaches main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check whether this version is already released
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          releases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[].tag_name')"
+          if grep -Fxq -- "$VERSION" <<< "$releases"; then
+            echo "Release $VERSION already exists - nothing to publish."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version $VERSION is not released yet - publishing."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download Shortcuts.pak.zip
+        if: steps.gate.outputs.release == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: Shortcuts-pak-zip
+
+      - name: Build release notes from the pak.json changelog
+        if: steps.gate.outputs.release == 'true'
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          notes="$(jq -r --arg v "$VERSION" '.changelog[$v] // empty' pak.json)"
+          if [ -z "$notes" ]; then
+            echo "::error::pak.json has no changelog entry for $VERSION"
+            exit 1
+          fi
+          printf '%s\n' "$notes" > notes.md
+          cat notes.md
+
+      - name: Publish GitHub Release
+        if: steps.gate.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          test -f Shortcuts.pak.zip
+          gh release create "$VERSION" Shortcuts.pak.zip \
+            --target "$GITHUB_SHA" \
+            --title "Shortcuts $VERSION" \
+            --notes-file notes.md
+          echo "Published $VERSION"
+          gh release view "$VERSION" --json assets --jq '.assets[].name'

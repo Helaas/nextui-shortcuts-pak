@@ -97,7 +97,8 @@ static void blit_cover(SDL_Surface *src, SDL_Surface *dst)
 /* ── NextUI-matching art layout ───────────────────────────────── */
 
 /* NextUI's FIXED_SCALE per platform (platform.h): scales UI metrics from
- * the 640x480 design base. tg5040 detects the Brick at runtime. */
+ * the 640x480 design base. tg5040 detects the Brick at runtime.
+ * H700 also uses FIXED_SCALE=2, including on its 480-line panels. */
 static int artwork_fixed_scale(void)
 {
 #ifndef TESTING

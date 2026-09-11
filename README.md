@@ -10,7 +10,7 @@ Create and manage NextUI main menu shortcuts for ROMs and Tools on tg5040/tg5050
 | `tg5040` (TG3040) | TrimUI Brick | 1024×768 | Docker (ARM64) |
 | `tg5050` | TrimUI Smart Pro S | 1280×720 | Docker (ARM64) |
 | `my355` | Miyoo Flip | 640×480 | Docker (ARM64) |
-| `h700` | Anbernic H700 devices | 720×480 | Docker (ARM64) |
+| `h700` | Anbernic H700 devices | Model-dependent (640×480, 720×480, 720×720) | Docker (ARM64) |
 
 > The Brick and Smart Pro share the same `tg5040` filesystem layout (tools, roms, settings paths are identical). The pak auto-detects the Brick via the `DEVICE` environment variable (`"brick"` vs `"smartpro"`), which NextUI's `launch.sh` exports at startup, and generates correctly sized `bg.png` images at 1024×768.
 
@@ -266,6 +266,12 @@ The `.pak.zip` includes the binary, `launch.sh`, `pak.json`, `LICENSE`, and any 
 2. To install a single-platform build manually, extract `build/release/<platform>/Shortcuts.pak.zip` to `Tools/<platform>/Shortcuts.pak/` on your SD card
 3. Install `build/release/all/Shortcuts.pak.zip` through Pak Store, or extract its contents into `Tools/<platform>/Shortcuts.pak`
 4. Launch from the NextUI Tools menu
+
+## Automated Releases
+
+The **Build** workflow runs regression tests and packages `Shortcuts.pak.zip` on pull requests. The archive is attached to the workflow run for download.
+
+To publish, bump `version` in `pak.json`, add its `changelog` entry, and merge to `main`. The **Release** workflow builds the package and creates a GitHub Release for that version, with `Shortcuts.pak.zip` attached and the changelog entry as its notes. Existing releases are left unchanged. A manual release run is also available on `main`.
 
 ## Acknowledgements
 

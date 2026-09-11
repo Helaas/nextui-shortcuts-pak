@@ -1,12 +1,13 @@
 {
   "name": "Shortcuts",
-  "version": "v2.2.2",
+  "version": "v2.3.0",
   "type": "TOOL",
   "description": "Create and manage main menu shortcuts for ROMs and Tools on NextUI.",
   "author": "Helaas",
   "repo_url": "https://github.com/Helaas/nextui-shortcuts-pak",
   "release_filename": "Shortcuts.pak.zip",
   "changelog": {
+    "v2.3.0": "Adds H700 (Anbernic) support and Apostrophe v1.2.0 input fixes. One universal build now serves every supported platform and ships as Shortcuts.pak.zip.",
     "v2.2.2": "Fixes shortcut art appearing doubled/ghosted by matching NextUI's own art position, size, and corner rounding exactly.",
     "v2.2.1": "Fixes blue-tinted shortcut artwork backgrounds caused by NextUI's RGBA theme color format.",
     "v2.2.0": "Fixes incorrect colors with NextUI's RGBA theme format.",
