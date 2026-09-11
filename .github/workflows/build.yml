@@ -1,0 +1,70 @@
+name: Build
+
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      version:
+        description: Version string read from pak.json
+        value: ${{ jobs.universal.outputs.version }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  universal:
+    name: Universal Shortcuts (Shortcuts.pak.zip)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Read package metadata
+        id: meta
+        run: |
+          version="$(jq -er '.version | select(type == "string" and length > 0)' pak.json)"
+          jq -e '.release_filename == "Shortcuts.pak.zip"' pak.json
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building Shortcuts $version"
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libsqlite3-dev
+
+      - name: Run regression tests
+        run: make test-native
+
+      - name: Build and package
+        run: make package
+
+      - name: Summarize package
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          unzip -t build/release/all/Shortcuts.pak.zip
+          {
+            echo "### Shortcuts $VERSION"
+            echo '```'
+            unzip -Z1 build/release/all/Shortcuts.pak.zip | sort
+            echo
+            sha256sum build/universal/shortcuts build/release/all/Shortcuts.pak.zip
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Shortcuts.pak.zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Shortcuts-pak-zip
+          path: build/release/all/Shortcuts.pak.zip
+          if-no-files-found: error
